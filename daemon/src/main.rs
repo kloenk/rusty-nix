@@ -13,28 +13,28 @@ fn main() {
     }
     env_logger::init();
     let mut app = App::new(env!("CARGO_PKG_NAME"))
-      .version(env!("CARGO_PKG_VERSION"))
-      .author(env!("CARGO_PKG_AUTHORS"))
-      .about(env!("CARGO_PKG_DESCRIPTION"))
-      .arg(
-          Arg::with_name("daemon")
-            .long("daemon")
-            .help("ignored for backwards compability")
-            .takes_value(false)
-      )
-      .arg(
-          Arg::with_name("stdio")
-            .long("stdio")
-            .help("read from stdin")
-            .takes_value(false)
-      );
-      // FIXME: add all other options
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .arg(
+            Arg::with_name("daemon")
+                .long("daemon")
+                .help("ignored for backwards compability")
+                .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("stdio")
+                .long("stdio")
+                .help("read from stdin")
+                .takes_value(false),
+        );
+    // FIXME: add all other options
 
-      if cfg!(feature = "color") {
-          app = app
-                .setting(clap::AppSettings::ColorAuto)
-                .setting(clap::AppSettings::ColoredHelp);
-      }
+    if cfg!(feature = "color") {
+        app = app
+            .setting(clap::AppSettings::ColorAuto)
+            .setting(clap::AppSettings::ColoredHelp);
+    }
 
     let matches = app.get_matches();
 
@@ -54,6 +54,6 @@ fn main() {
         Err(v) => {
             error!("{}", v);
             std::process::exit(v.get_code()); // TODO: change exit codes
-        },
+        }
     }
 }

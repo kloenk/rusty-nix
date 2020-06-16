@@ -11,6 +11,7 @@ impl Config {
         Self::default()
     }
 
+    #[allow(unused_must_use)]
     pub fn run(self) -> CommandResult<()> {
         if self.stdio {
             let socket_path = "/nix/var/nix/daemon-socket/socket"; // FIXME: read from config
@@ -36,8 +37,6 @@ impl Config {
 
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            stdio: false,
-        }
+        Self { stdio: false }
     }
 }
