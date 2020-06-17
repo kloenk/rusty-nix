@@ -31,206 +31,209 @@ use std::ops::{AddAssign, MulAssign, Neg};
 #[serde(rename_all = "kebab-case")]
 pub struct NixConfig {
     #[serde(default = "default_store")]
-    store: String, // The default Nix store to use.
+    pub store: String, // The default Nix store to use.
 
-    keep_failed: bool, // Whether to keep temporary directories of failed builds.
-    keep_going: bool,  // Whether to keep building derivations when another build fails.
+    #[serde(default = "default_socket_path")]
+    pub nix_daemon_socket_file: String, // path to the nix daemon socket path
+
+    pub keep_failed: bool, // Whether to keep temporary directories of failed builds.
+    pub keep_going: bool,  // Whether to keep building derivations when another build fails.
     #[serde(alias = "build-fallback")]
-    fallback: bool, // Whether to fall back to building when substitution fails.
+    pub fallback: bool, // Whether to fall back to building when substitution fails.
 
     #[serde(default = "default_true")]
-    verbose_build: bool, // Whether to show build log output in real time.
+    pub verbose_build: bool, // Whether to show build log output in real time.
 
     #[serde(default = "default_ten")]
-    log_lines: usize,
+    pub log_lines: usize,
 
     #[serde(default = "default_max_jobs", alias = "build-max-jobs")]
-    max_jobs: String, // Maximum number of parallel build jobs.
+    pub max_jobs: String, // Maximum number of parallel build jobs.
 
     #[serde(default = "default_cores", alias = "build-cores")]
-    cores: usize, // umber of CPU cores to utilize in parallel within a build, i.e. by passing this number to Make via '-j'. 0 means that the number of actual CPU cores on the local host ought to be auto-detected
+    pub cores: usize, // umber of CPU cores to utilize in parallel within a build, i.e. by passing this number to Make via '-j'. 0 means that the number of actual CPU cores on the local host ought to be auto-detected
 
-    read_only: bool,
+    pub read_only: bool,
 
     #[serde(default = "default_system")]
-    system: String, // The canonical Nix system name.
+    pub system: String, // The canonical Nix system name.
 
     #[serde(alias = "build-max-silent-time")]
-    max_silent_time: usize, // The maximum time in seconds that a builer can go without producing any output on stdout/stderr before it is killed. 0 means infinity.
+    pub max_silent_time: usize, // The maximum time in seconds that a builer can go without producing any output on stdout/stderr before it is killed. 0 means infinity.
     #[serde(alias = "build-timeout")]
-    timeout: usize, // The maximum duration in seconds that a builder can run. 0 means infinity.
+    pub timeout: usize, // The maximum duration in seconds that a builder can run. 0 means infinity.
 
     #[serde(default = "default_build_hook")]
-    build_hook: String, // The path of the helper program that executes builds to remote machines.
+    pub build_hook: String, // The path of the helper program that executes builds to remote machines.
 
     // FIXME: default value
-    builders: String, // A semicolon-separated list of build machines, in the format of nix.machines.
-    builders_use_substitutes: bool, // Whether build machines should use their own substitutes for obtaining build dependencies if possible, rather than waiting for this host to upload them.
+    pub builders: String, // A semicolon-separated list of build machines, in the format of nix.machines.
+    pub builders_use_substitutes: bool, // Whether build machines should use their own substitutes for obtaining build dependencies if possible, rather than waiting for this host to upload them.
 
     // FIXME: default value
-    gc_reserved_space: usize, // Amount of reserved disk space for the garbage collector.
+    pub gc_reserved_space: usize, // Amount of reserved disk space for the garbage collector.
 
     #[serde(default = "default_true")]
-    fsync_metdata: bool, // "Amount of reserved disk space for the garbage collector.
+    pub fsync_metdata: bool, // "Amount of reserved disk space for the garbage collector.
 
     #[serde(default = "default_true")] // FIXME: not on WSL1
-    use_sqlite_wal: bool,
+    pub use_sqlite_wal: bool,
 
-    sync_before_registering: bool, // Whether to call sync() before registering a path as valid.
+    pub sync_before_registering: bool, // Whether to call sync() before registering a path as valid.
 
     #[serde(default = "default_true", alias = "build-use-substitutes")]
-    substitute: bool, // Whether to use substitutes.
+    pub substitute: bool, // Whether to use substitutes.
 
-    build_users_group: String, // The Unix group that contains the build users.
+    pub build_users_group: String, // The Unix group that contains the build users.
 
     #[serde(alias = "build-impersonate-linux-26")]
-    impersonate_linux_26: bool, // Whether to impersonate a Linux 2.6 machine on newer kernels.
+    pub impersonate_linux_26: bool, // Whether to impersonate a Linux 2.6 machine on newer kernels.
 
     #[serde(default = "default_true", alias = "build-keep-log")]
-    keep_build_log: bool, // Whether to store build logs.
+    pub keep_build_log: bool, // Whether to store build logs.
 
     #[serde(default = "default_true", alias = "build-compress-log")]
-    compress_build_log: bool, // Whether to compress logs.
+    pub compress_build_log: bool, // Whether to compress logs.
 
     #[serde(alias = "build-max-log-size")]
-    max_buid_log_size: usize, // Maximum number of bytes a builder can write to stdout/stderr before being killed (0 means no limit).
+    pub max_buid_log_size: usize, // Maximum number of bytes a builder can write to stdout/stderr before being killed (0 means no limit).
 
     #[serde(default = "default_ten")]
-    build_poll_interval: usize, // How often (in seconds) to poll for locks.
+    pub build_poll_interval: usize, // How often (in seconds) to poll for locks.
 
-    gc_check_reachability: bool, // Whether to check if new GC roots can in fact be found by the garbage collector.
+    pub gc_check_reachability: bool, // Whether to check if new GC roots can in fact be found by the garbage collector.
 
     #[serde(alias = "keep-outputs")]
-    gc_keep_outputs: bool, // Whether the garbage collector should keep outputs of live derivations.
+    pub gc_keep_outputs: bool, // Whether the garbage collector should keep outputs of live derivations.
 
     #[serde(default = "default_true", alias = "keep-derivations")]
-    gc_keep_derivations: bool, // Whether the garbage collector should keep derivers of live paths.
+    pub gc_keep_derivations: bool, // Whether the garbage collector should keep derivers of live paths.
 
-    auto_optimise_store: bool, // Whether to automatically replace files with identical contents with hard links.
+    pub auto_optimise_store: bool, // Whether to automatically replace files with identical contents with hard links.
 
     #[serde(alias = "env-keep-derivations")]
-    keep_env_derivations: bool, // Whether to add derivations as a dependency of user environments (to prevent them from being GCed).
+    pub keep_env_derivations: bool, // Whether to add derivations as a dependency of user environments (to prevent them from being GCed).
 
-    show_trace: bool, // Whether to show a stack trace on evaluation errors.
+    pub show_trace: bool, // Whether to show a stack trace on evaluation errors.
 
     // FIXME: default value
     #[serde(alias = "build-use-chroot", alias = "build-use-sandbox")]
-    sandbox: String, // Whether to enable sandboxed builds. Can be \"true\", \"false\" or \"relaxed\".
+    pub sandbox: String, // Whether to enable sandboxed builds. Can be \"true\", \"false\" or \"relaxed\".
 
     #[serde(alias = "build-chroot-dirs", alias = "build-sandbox-paths")]
-    sandbox_paths: Vec<String>, // The paths to make available inside the build sandbox.
+    pub sandbox_paths: Vec<String>, // The paths to make available inside the build sandbox.
 
     #[serde(default = "default_true")]
-    sandbox_fallback: bool, // Whether to disable sandboxing when the kernel doesn't allow it.
+    pub sandbox_fallback: bool, // Whether to disable sandboxing when the kernel doesn't allow it.
 
     #[serde(alias = "build-extra-chroot-dirs", alias = "build-extra-sandbox-paths")]
-    extra_sandbox_paths: Vec<String>, // Additional paths to make available inside the build sandbox.
+    pub extra_sandbox_paths: Vec<String>, // Additional paths to make available inside the build sandbox.
 
     #[serde(alias = "repeat")]
-    build_repeat: usize, // The number of times to repeat a build in order to verify determinism.
+    pub build_repeat: usize, // The number of times to repeat a build in order to verify determinism.
 
     #[cfg(target_os = "linux")]
     #[serde(default = "default_sandbox_dev_shm_size")]
-    sandbox_dev_shm_size: String, // The size of /dev/shm in the build sandbox.
+    pub sandbox_dev_shm_size: String, // The size of /dev/shm in the build sandbox.
 
     #[cfg(target_os = "linux")]
     #[serde(default = "default_sandbox_build_dir")]
-    sandbox_build_dir: String, // The build directory inside the sandbox.
+    pub sandbox_build_dir: String, // The build directory inside the sandbox.
 
-    allowed_impure_host_deps: Vec<String>, // Which prefixes to allow derivations to ask for access to (primarily for Darwin).
+    pub allowed_impure_host_deps: Vec<String>, // Which prefixes to allow derivations to ask for access to (primarily for Darwin).
 
     #[cfg(target_os = "macos")]
-    darwin_log_sandbox_violations: bool, // Whether to log Darwin sandbox access violations to the system log.
+    pub darwin_log_sandbox_violations: bool, // Whether to log Darwin sandbox access violations to the system log.
 
-    run_diff_hook: bool, // Whether to run the program specified by the diff-hook setting repeated builds produce a different result. Typically used to plug in diffoscope.
+    pub run_diff_hook: bool, // Whether to run the program specified by the diff-hook setting repeated builds produce a different result. Typically used to plug in diffoscope.
 
-    diff_hook: String, // A program that prints out the differences between the two paths specified on its command line.
+    pub diff_hook: String, // A program that prints out the differences between the two paths specified on its command line.
 
     #[serde(default = "default_true")]
-    enforce_determinism: bool, // Whether to fail if repeated builds produce different output.
+    pub enforce_determinism: bool, // Whether to fail if repeated builds produce different output.
 
     #[serde(
         default = "default_trusted_pub_keys",
         alias = "binary-cache-public-keys"
     )]
-    trusted_public_keys: Vec<String>, // Trusted public keys for secure substitution.
+    pub trusted_public_keys: Vec<String>, // Trusted public keys for secure substitution.
 
-    secret_key_files: Vec<String>, // Secret keys with which to sign local builds.
+    pub secret_key_files: Vec<String>, // Secret keys with which to sign local builds.
 
     #[serde(default = "default_tarball_ttl")]
-    tarball_ttl: usize, // How long downloaded files are considered up-to-date.
+    pub tarball_ttl: usize, // How long downloaded files are considered up-to-date.
 
     #[serde(default = "default_true")]
-    require_sigs: bool, // Whether to check that any non-content-addressed path added to the Nix store has a valid signature (that is, one signed using a key listed in 'trusted-public-keys'.
+    pub require_sigs: bool, // Whether to check that any non-content-addressed path added to the Nix store has a valid signature (that is, one signed using a key listed in 'trusted-public-keys'.
 
     #[serde(default = "default_extra_platforms")]
-    extra_platforms: Vec<String>, // Additional platforms that can be built on the local system. These may be supported natively (e.g. armv7 on some aarch64 CPUs or using hacks like qemu-user.
+    pub extra_platforms: Vec<String>, // Additional platforms that can be built on the local system. These may be supported natively (e.g. armv7 on some aarch64 CPUs or using hacks like qemu-user.
 
     #[serde(default = "default_system_features")]
-    system_features: Vec<String>, // Optional features that this system implements (like \"kvm\").
+    pub system_features: Vec<String>, // Optional features that this system implements (like \"kvm\").
 
     #[serde(default = "default_substiturers")]
-    substituters: Vec<String>, // The URIs of substituters (such as https://cache.nixos.org/).
+    pub substituters: Vec<String>, // The URIs of substituters (such as https://cache.nixos.org/).
 
-    extra_substituters: Vec<String>, // Additional URIs of substituters.
+    pub extra_substituters: Vec<String>, // Additional URIs of substituters.
 
-    trusted_substituters: Vec<String>, // Disabled substituters that may be enabled via the substituters option by untrusted users.
+    pub trusted_substituters: Vec<String>, // Disabled substituters that may be enabled via the substituters option by untrusted users.
 
     #[serde(default = "default_trusted_users")]
-    trusted_users: Vec<String>, // Which users or groups are trusted to ask the daemon to do unsafe things.
+    pub trusted_users: Vec<String>, // Which users or groups are trusted to ask the daemon to do unsafe things.
 
     #[serde(default = "default_narinfo_cache_negative_ttl")]
-    narinfo_cache_negative_ttl: usize, // The TTL in seconds for negative lookups in the disk cache i.e binary cache lookups that return an invalid path result
+    pub narinfo_cache_negative_ttl: usize, // The TTL in seconds for negative lookups in the disk cache i.e binary cache lookups that return an invalid path result
 
     #[serde(default = "default_narinfo_cache_positive_ttl")]
-    narinfo_cache_positive_ttl: usize, // The TTL in seconds for positive lookups in the disk cache i.e binary cache lookups that return a valid path result.
+    pub narinfo_cache_positive_ttl: usize, // The TTL in seconds for positive lookups in the disk cache i.e binary cache lookups that return a valid path result.
 
     #[serde(default = "default_allowed_users")]
-    allowed_users: Vec<String>, // Which users or groups are allowed to connect to the daemon.
+    pub allowed_users: Vec<String>, // Which users or groups are allowed to connect to the daemon.
 
     #[serde(default = "default_true")]
-    print_missing: bool, // Whether to print what paths need to be built or downloaded.
+    pub print_missing: bool, // Whether to print what paths need to be built or downloaded.
 
-    pre_build_hook: String, // A program to run just before a build to set derivation-specific build settings."
+    pub pre_build_hook: String, // A program to run just before a build to set derivation-specific build settings."
 
-    post_build_hook: String, // A program to run just after each successful build.
+    pub post_build_hook: String, // A program to run just after each successful build.
 
     // FIXME: default value
-    netrc: String, // Path to the netrc file used to obtain usernames/passwords for downloads.
+    pub netrc: String, // Path to the netrc file used to obtain usernames/passwords for downloads.
 
     // caFile // Path to the SSL CA file used
     #[cfg(target_os = "linux")]
     #[serde(default = "default_true")]
-    filter_syscalls: bool, // Whether to prevent certain dangerous system calls, such as creation of setuid/setgid files or adding ACLs or extended attributes. Only disable this if you're aware of the security implications.
+    pub filter_syscalls: bool, // Whether to prevent certain dangerous system calls, such as creation of setuid/setgid files or adding ACLs or extended attributes. Only disable this if you're aware of the security implications.
 
     #[cfg(target_os = "linux")]
-    allow_new_privileges: bool, // Whether builders can acquire new privileges by calling programs with setuid/setgid bits or with file capabilities.
+    pub allow_new_privileges: bool, // Whether builders can acquire new privileges by calling programs with setuid/setgid bits or with file capabilities.
 
     #[serde(default = "default_hashed_mirrors")]
-    hashed_mirrors: Vec<String>, // A list of servers used by builtins.fetchurl to fetch files by hash.
+    pub hashed_mirrors: Vec<String>, // A list of servers used by builtins.fetchurl to fetch files by hash.
 
-    min_free: usize, // Automatically run the garbage collector when free disk space drops below the specified amount.
+    pub min_free: usize, // Automatically run the garbage collector when free disk space drops below the specified amount.
 
     // FIXME: usize::max as default
-    max_free: usize, // Stop deleting garbage when free disk space is above the specified amount.
+    pub max_free: usize, // Stop deleting garbage when free disk space is above the specified amount.
 
     #[serde(default = "default_min_free_checking_intervall")]
-    min_free_check_interval: usize, // Number of seconds between checking free disk space.
+    pub min_free_check_interval: usize, // Number of seconds between checking free disk space.
 
-    plugin_files: Vec<String>, // warn if used!!!
+    pub plugin_files: Vec<String>, // warn if used!!!
 
-    github_access_token: String,
+    pub github_access_token: String,
 
-    experimental_features: Vec<String>, // Experimental Nix features to enable.
-
-    #[serde(default = "default_true")]
-    allow_dirty: bool, // Whether to allow dirty Git/Mercurial trees.
+    pub experimental_features: Vec<String>, // Experimental Nix features to enable.
 
     #[serde(default = "default_true")]
-    warn_dirty: bool, // Whether to warn about dirty Git/Mercurial trees.
+    pub allow_dirty: bool, // Whether to allow dirty Git/Mercurial trees.
+
+    #[serde(default = "default_true")]
+    pub warn_dirty: bool, // Whether to warn about dirty Git/Mercurial trees.
 
     #[serde(default = "default_flake_registries")]
-    flake_registry: String, // Path or URI of the global flake registry.
+    pub flake_registry: String, // Path or URI of the global flake registry.
 }
 
 impl NixConfig {
@@ -276,6 +279,10 @@ fn default_store() -> String {
     use std::env::var;
     //var("NIX_STORE_DIR").unwrap_or_else(|_| var("NIX_STORE").unwrap_or(String::from("auto")))
     var("NIX_REMOTE").unwrap_or_else(|_| String::from("auto"))
+}
+
+fn default_socket_path() -> String {
+    String::from("/nix/var/nix/daemon-socket/socket")
 }
 
 fn default_max_jobs() -> String {

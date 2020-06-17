@@ -73,8 +73,8 @@ impl NixDaemon {
     pub async fn run(self) -> CommandResult<()> {
         if self.stdio {
             // implement stdio for other store types
-            let socket_path = "/nix/var/nix/daemon-socket/socket"; // FIXME: read from config
-            let stream = UnixStream::connect(socket_path)?;
+            //let socket_path = "/nix/var/nix/daemon-socket/socket"; // FIXME: read from config
+            let stream = UnixStream::connect(&self.nix_config.nix_daemon_socket_file)?;
 
             let socket_arc = std::sync::Arc::new(stream);
             let (mut socket_tx, mut socket_rx) = (socket_arc.try_clone()?, socket_arc.try_clone()?);
@@ -89,9 +89,16 @@ impl NixDaemon {
             for t in connections {
                 t.join().unwrap();
             }
+        } else {
+            self.daemon_loop().await?;
         }
-        println!("{:#?}", self.nix_config);
         Ok(()) // FIXME: unreachable() //?
+    }
+
+    async fn daemon_loop(self) -> CommandResult<()> {
+        println!("running loop");
+
+        Ok(())
     }
 
     fn new_from_config(config: Arc<NixConfig>) -> Self {
