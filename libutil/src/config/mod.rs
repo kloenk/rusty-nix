@@ -145,7 +145,7 @@ impl<'de> Deserializer<'de> {
     where
         T: Neg<Output = T> + AddAssign<T> + MulAssign<T> + From<i8>,
     {
-        todo!()
+        unimplemented!()
     }
 }
 
@@ -180,7 +180,10 @@ impl<'de> MapAccess<'de> for Deserializer<'de> {
     where
         V: DeserializeSeed<'de>,
     {
-        if !self.input.starts_with(" = ") {
+        if self.input.starts_with(" =\n") {
+            // FIXME: reset value
+            self.input = &self.input[" =\n".len()..];
+        } else if !self.input.starts_with(" = ") {
             trace!("parsed until here:\n{}", self.input);
             return Err(Error::ExpectedMapEquals);
         }
@@ -283,7 +286,7 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
     where
         V: Visitor<'de>,
     {
-        todo!()
+        unimplemented!()
     }
 
     fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
