@@ -27,6 +27,14 @@ fn main() {
                 .long("stdio")
                 .help("read from stdin")
                 .takes_value(false),
+        )
+        .arg(
+            Arg::with_name("config")
+                .long("config")
+                .short("c")
+                .help("set nix conifg file")
+                .takes_value(true)
+                .default_value("/etc/nix/nix.conf"),
         );
     // FIXME: add all other options
 
@@ -40,7 +48,7 @@ fn main() {
 
     let mut config = nix_daemon::Config::new();
 
-    let config_file = std::path::Path::new("/etc/nix/nix.conf");
+    let config_file = std::path::Path::new(matches.value_of("config").unwrap());
     let nix_config = libutil::config::NixConfig::parse_file(config_file).unwrap();
     // TODO: merge with args
 

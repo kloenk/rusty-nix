@@ -33,7 +33,7 @@ impl Config {
                 t.join().unwrap();
             }
         }
-        println!("{:?}", config);
+        println!("{:#?}", config);
         Ok(()) // FIXME: unreachable() //?
     }
 }
