@@ -15,6 +15,8 @@ custom_error = "1.7"
 clap = "2.33"
 log = "0.4"
 env_logger = "0.6"
+tokio = { version = "*", features = [ "full" ] }
+
 libstore = { path = "../libstore" }
 libutil = { path = "../libutil" }
 
