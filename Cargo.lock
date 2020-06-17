@@ -140,6 +140,7 @@ name = "nix-daemon"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "custom_error",
  "env_logger",
  "libstore",
  "libutil",

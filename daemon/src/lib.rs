@@ -1,7 +1,9 @@
 use std::os::unix::net::UnixStream;
 
-use libstore::error::CommandResult;
+use error::CommandResult;
 use libutil::config::NixConfig;
+
+pub mod error;
 
 pub struct Config {
     pub stdio: bool,
