@@ -9,7 +9,7 @@ fn main() {
         std::env::set_var("RUST_LOG", "nix-daemon=trace,trace"); // TODO: change on release?
     }*/
     if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "nix-daemon=trace,trace"); // TODO: change on release?
+        std::env::set_var("RUST_LOG", "nix-daemon=trace,main=trace"); // TODO: change on release?
     }
     env_logger::init();
     let mut app = App::new(env!("CARGO_PKG_NAME"))
@@ -40,6 +40,10 @@ fn main() {
 
     let mut config = nix_daemon::Config::new();
 
+    let config_file = std::path::Path::new("/etc/nix/nix.conf");
+    let nix_config = libutil::config::NixConfig::parse_file(config_file).unwrap();
+    // TODO: merge with args
+
     if matches.is_present("daemon") {
         trace!("provided `--daemon` which is only here for backward compability");
     }
@@ -49,7 +53,7 @@ fn main() {
         config.stdio = true;
     }
 
-    match config.run() {
+    match config.run(&nix_config) {
         Ok(_) => std::process::exit(0),
         Err(v) => {
             error!("{}", v);

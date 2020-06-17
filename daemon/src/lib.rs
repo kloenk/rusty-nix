@@ -1,6 +1,7 @@
 use std::os::unix::net::UnixStream;
 
 use libstore::error::CommandResult;
+use libutil::config::NixConfig;
 
 pub struct Config {
     pub stdio: bool,
@@ -12,8 +13,9 @@ impl Config {
     }
 
     #[allow(unused_must_use)]
-    pub fn run(self) -> CommandResult<()> {
+    pub fn run(self, config: &NixConfig) -> CommandResult<()> {
         if self.stdio {
+            // implement stdio for other store types
             let socket_path = "/nix/var/nix/daemon-socket/socket"; // FIXME: read from config
             let stream = UnixStream::connect(socket_path)?;
 
@@ -31,6 +33,7 @@ impl Config {
                 t.join().unwrap();
             }
         }
+        println!("{:?}", config);
         Ok(()) // FIXME: unreachable() //?
     }
 }

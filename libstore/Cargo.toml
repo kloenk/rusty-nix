@@ -3,6 +3,7 @@ name = "libstore"
 version = "0.1.0"
 authors = ["Finn Behrens <me@kloenk.de>"]
 edition = "2018"
+license = "LGPL-2.1-only"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

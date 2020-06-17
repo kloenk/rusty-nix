@@ -20,7 +20,7 @@
 
 pub mod error;
 
-use crate::error::{Error, Result};
+use crate::config::error::{Error, Result};
 use log::{trace, warn};
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{de, forward_to_deserialize_any, Deserialize, Serialize};
@@ -47,6 +47,39 @@ pub struct NixConfig {
     trusted_substituters: Vec<String>,
     trusted_users: Vec<String>,
     experimental_features: Vec<String>,
+}
+
+impl NixConfig {
+    pub fn parse_file(file: &std::path::Path) -> Result<Self> {
+        let old_dir = std::env::current_dir().unwrap();
+        let base_path = file.parent().unwrap();
+        std::env::set_current_dir(&base_path).unwrap();
+
+        let config_text = std::fs::read_to_string(file).unwrap();
+        let config_text = Self::pre_text(config_text)?;
+        println!("config: \n{}", config_text);
+        let config: Result<NixConfig> = crate::config::from_str(&config_text);
+
+        std::env::set_current_dir(&old_dir.as_path()).unwrap();
+        config
+    }
+
+    pub fn pre_text(text: String) -> Result<String> {
+        let mut end_text = String::new();
+        for line in text.lines() {
+            if line.starts_with('#') {
+            } else if line.is_empty() {
+            } else if line.starts_with("include") {
+                // TODO include
+            } else if line.starts_with("!include") {
+                // TODO try include
+            } else {
+                // TODO parse commands at the end
+                end_text.push_str(&format!("{}\n", line));
+            }
+        }
+        Ok(end_text)
+    }
 }
 
 struct Deserializer<'de> {
