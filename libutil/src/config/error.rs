@@ -20,8 +20,18 @@
 
 use std::fmt::Display;
 
+use custom_error::custom_error;
+
+custom_error! {
+    pub Error
+        ParseError{source: ParseError} = "Parsing Error: {source}",
+        Io{source: std::io::Error} = "IoError: {source}",
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Clone, Debug, PartialEq)]
-pub enum Error {
+pub enum ParseError {
     Message(String),
     TrailingCharacters,
     ExpectedMapNewline,
@@ -31,17 +41,17 @@ pub enum Error {
     Eof,
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type ParseResult<T> = std::result::Result<T, ParseError>;
 
-impl std::error::Error for Error {}
+impl std::error::Error for ParseError {}
 
-impl serde::de::Error for Error {
+impl serde::de::Error for ParseError {
     fn custom<T: Display>(msg: T) -> Self {
-        Error::Message(msg.to_string())
+        ParseError::Message(msg.to_string())
     }
 }
 
-impl Display for Error {
+impl Display for ParseError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(formatter, "{:?}", self)
     }

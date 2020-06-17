@@ -7,14 +7,12 @@ use nix_daemon::NixDaemon;
 
 fn main() {
     // setup env
-    if std::env::var("RUST_LOG").is_err() {
-        std::env::set_var("RUST_LOG", "nix-daemon=trace,main=trace"); // TODO: change on release?
-    }
-    env_logger::init();
+    env_logger::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     // start app
     if let Err(e) = run() {
         error!("{}", e);
+        //println!("error: {}", e);
         std::process::exit(e.get_code());
     }
 }

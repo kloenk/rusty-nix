@@ -10,3 +10,5 @@ license = "GPL-3.0-or-later"
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
+custom_error = "1.7"
+num_cpus = "1.13"

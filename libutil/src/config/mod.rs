@@ -20,7 +20,7 @@
 
 pub mod error;
 
-use crate::config::error::{Error, Result};
+use crate::config::error::{ParseError, ParseResult, Result};
 use log::{trace, warn};
 use serde::de::{DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{de, forward_to_deserialize_any, Deserialize, Serialize};
@@ -124,7 +124,7 @@ pub struct NixConfig {
     sandbox_fallback: bool, // Whether to disable sandboxing when the kernel doesn't allow it.
 
     #[serde(alias = "build-extra-chroot-dirs", alias = "build-extra-sandbox-paths")]
-    extra_sandbox_pathes: Vec<String>, // Additional paths to make available inside the build sandbox.
+    extra_sandbox_paths: Vec<String>, // Additional paths to make available inside the build sandbox.
 
     #[serde(alias = "repeat")]
     build_repeat: usize, // The number of times to repeat a build in order to verify determinism.
@@ -163,10 +163,10 @@ pub struct NixConfig {
     #[serde(default = "default_true")]
     require_sigs: bool, // Whether to check that any non-content-addressed path added to the Nix store has a valid signature (that is, one signed using a key listed in 'trusted-public-keys'.
 
-    // FIXME: i686-linux if we are x86_64-linux
+    #[serde(default = "default_extra_platforms")]
     extra_platforms: Vec<String>, // Additional platforms that can be built on the local system. These may be supported natively (e.g. armv7 on some aarch64 CPUs or using hacks like qemu-user.
 
-    // FIXME: getDefaultSystemFeatures()
+    #[serde(default = "default_system_features")]
     system_features: Vec<String>, // Optional features that this system implements (like \"kvm\").
 
     #[serde(default = "default_substiturers")]
@@ -221,7 +221,7 @@ pub struct NixConfig {
 
     github_access_token: String,
 
-    experimenat_features: Vec<String>, // Experimental Nix features to enable.
+    experimental_features: Vec<String>, // Experimental Nix features to enable.
 
     #[serde(default = "default_true")]
     allow_dirty: bool, // Whether to allow dirty Git/Mercurial trees.
@@ -235,41 +235,34 @@ pub struct NixConfig {
 
 impl NixConfig {
     pub fn parse_file(file: &std::path::Path) -> Result<Self> {
-        let old_dir = std::env::current_dir().unwrap();
+        let old_dir = std::env::current_dir()?;
         let base_path = file.parent().unwrap();
-        std::env::set_current_dir(&base_path).unwrap();
+        std::env::set_current_dir(&base_path)?;
 
-        let config_text = std::fs::read_to_string(file).unwrap();
+        let config_text = std::fs::read_to_string(file)?;
         let config_text = Self::pre_text(config_text)?;
-        let config: Result<NixConfig> = crate::config::from_str(&config_text);
+        let config: NixConfig = crate::config::from_str(&config_text)?;
 
-        std::env::set_current_dir(&old_dir.as_path()).unwrap();
+        std::env::set_current_dir(&old_dir.as_path())?;
 
-        // give warings
-        config
-            .as_ref()
-            .map(|v| {
-                for v in &v.plugin_files {
-                    eprintln!(
-                        "Warning: the plugin {} could not be loaded, because we are running rust",
-                        v
-                    )
-                }
-            })
-            .unwrap(); // FIXME: find something better to do with Err
+        for v in &config.plugin_files {
+            warn!("could not load plugin {}. We are running rust!", v);
+        }
 
-        config
+        Ok(config)
     }
 
-    pub fn pre_text(text: String) -> Result<String> {
+    pub fn pre_text(text: String) -> ParseResult<String> {
         let mut end_text = String::new();
         for line in text.lines() {
             if line.starts_with('#') {
             } else if line.is_empty() {
             } else if line.starts_with("include") {
                 // TODO include
+                warn!("implement parsing of include: {}", line);
             } else if line.starts_with("!include") {
                 // TODO try include
+                warn!("implement parsing of !include: {}", line);
             } else {
                 // TODO parse commands at the end
                 end_text.push_str(&format!("{}\n", line));
@@ -280,7 +273,9 @@ impl NixConfig {
 }
 
 fn default_store() -> String {
-    String::from("auto") // TODO: read from env
+    use std::env::var;
+    //var("NIX_STORE_DIR").unwrap_or_else(|_| var("NIX_STORE").unwrap_or(String::from("auto")))
+    var("NIX_REMOTE").unwrap_or_else(|_| String::from("auto"))
 }
 
 fn default_max_jobs() -> String {
@@ -288,11 +283,20 @@ fn default_max_jobs() -> String {
 }
 
 fn default_cores() -> usize {
-    8 // TODO: get core number
+    num_cpus::get()
 }
 
 fn default_system() -> String {
-    String::from("x86_64-linux") // TODO: get system type
+    use std::env::consts;
+    format!("{}-{}", consts::ARCH, consts::OS)
+}
+
+fn default_extra_platforms() -> Vec<String> {
+    let mut vec = Vec::new();
+    if default_system() == "x86_64-linux" {
+        vec.push(String::from("i686-linux"));
+    }
+    vec
 }
 
 fn default_build_hook() -> String {
@@ -361,6 +365,21 @@ fn default_sandbox_build_dir() -> String {
     String::from("/build")
 }
 
+#[cfg(target_os = "linux")]
+fn default_system_features() -> Vec<String> {
+    let mut vec = vec![
+        String::from("nixos-test"),
+        String::from("benchmark"),
+        String::from("big-parallel"),
+        String::from("recursive-nix"),
+    ];
+
+    if std::path::Path::new("/dev/kvm").exists() {
+        vec.push(String::from("kvm"));
+    }
+    vec
+}
+
 struct Deserializer<'de> {
     input: &'de str,
 }
@@ -370,7 +389,7 @@ impl<'de> Deserializer<'de> {
         Deserializer { input }
     }
 
-    fn parse_string(&mut self) -> Result<&'de str> {
+    fn parse_string(&mut self) -> ParseResult<&'de str> {
         // FIXME: handle escape sequences and/or quoting
         match self.input.find(char::is_whitespace) {
             Some(len) => {
@@ -380,11 +399,11 @@ impl<'de> Deserializer<'de> {
                 trace!("parsed as string: {}", s);
                 Ok(s)
             }
-            None => Err(Error::Eof),
+            None => Err(ParseError::Eof {}),
         }
     }
 
-    fn parse_bool(&mut self) -> Result<bool> {
+    fn parse_bool(&mut self) -> ParseResult<bool> {
         if self.input.starts_with("true") {
             self.input = &self.input["true".len()..];
             return Ok(true.into());
@@ -393,17 +412,17 @@ impl<'de> Deserializer<'de> {
             self.input = &self.input["false".len()..];
             return Ok(false.into());
         }
-        Err(Error::ExpectedBool)
+        Err(ParseError::ExpectedBool {})
     }
 
-    fn parse_unsigned<T>(&mut self) -> Result<T>
+    fn parse_unsigned<T>(&mut self) -> ParseResult<T>
     where
         T: AddAssign<T> + MulAssign<T> + From<u8>,
     {
-        let mut int = match self.input.chars().next().ok_or(Error::Eof)? {
+        let mut int = match self.input.chars().next().ok_or(ParseError::Eof {})? {
             ch @ '0'..='9' => T::from(ch as u8 - b'0'),
             _ => {
-                return Err(Error::ExpectedInteger);
+                return Err(ParseError::ExpectedInteger {});
             }
         };
         loop {
@@ -420,7 +439,7 @@ impl<'de> Deserializer<'de> {
         }
     }
 
-    fn parse_signed<T>(&mut self) -> Result<T>
+    fn parse_signed<T>(&mut self) -> ParseResult<T>
     where
         T: Neg<Output = T> + AddAssign<T> + MulAssign<T> + From<i8>,
     {
@@ -428,7 +447,7 @@ impl<'de> Deserializer<'de> {
     }
 }
 
-pub fn from_str<'a, T>(s: &'a str) -> Result<T>
+pub fn from_str<'a, T>(s: &'a str) -> ParseResult<T>
 where
     T: Deserialize<'a>,
 {
@@ -437,14 +456,14 @@ where
     if deserializer.input.is_empty() {
         Ok(t)
     } else {
-        Err(Error::TrailingCharacters)
+        Err(ParseError::TrailingCharacters {})
     }
 }
 
 impl<'de> MapAccess<'de> for Deserializer<'de> {
-    type Error = Error;
+    type Error = ParseError;
 
-    fn next_key_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>>
+    fn next_key_seed<K>(&mut self, seed: K) -> ParseResult<Option<K::Value>>
     where
         K: DeserializeSeed<'de>,
     {
@@ -455,7 +474,7 @@ impl<'de> MapAccess<'de> for Deserializer<'de> {
         seed.deserialize(self).map(Some)
     }
 
-    fn next_value_seed<V>(&mut self, seed: V) -> Result<V::Value>
+    fn next_value_seed<V>(&mut self, seed: V) -> ParseResult<V::Value>
     where
         V: DeserializeSeed<'de>,
     {
@@ -464,7 +483,7 @@ impl<'de> MapAccess<'de> for Deserializer<'de> {
             self.input = &self.input[" =\n".len()..];
         } else if !self.input.starts_with(" = ") {
             trace!("parsed until here:\n{}", self.input);
-            return Err(Error::ExpectedMapEquals);
+            return Err(ParseError::ExpectedMapEquals {});
         }
         self.input = &self.input[" = ".len()..];
         seed.deserialize(self)
@@ -472,9 +491,9 @@ impl<'de> MapAccess<'de> for Deserializer<'de> {
 }
 
 impl<'de> SeqAccess<'de> for Deserializer<'de> {
-    type Error = Error;
+    type Error = ParseError;
 
-    fn next_element_seed<T>(&mut self, seed: T) -> Result<Option<T::Value>>
+    fn next_element_seed<T>(&mut self, seed: T) -> ParseResult<Option<T::Value>>
     where
         T: DeserializeSeed<'de>,
     {
@@ -487,16 +506,16 @@ impl<'de> SeqAccess<'de> for Deserializer<'de> {
 }
 
 impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
-    type Error = Error;
+    type Error = ParseError;
 
-    fn deserialize_any<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_any<V>(self, _visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         unimplemented!()
     }
 
-    fn deserialize_bool<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_bool<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
@@ -505,98 +524,98 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
 
     // The `parse_signed` function is generic over the integer type `T` so here
     // it is invoked with `T=i8`. The next 8 methods are similar.
-    fn deserialize_i8<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_i8<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_i8(self.parse_signed()?)
     }
 
-    fn deserialize_i16<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_i16<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_i16(self.parse_signed()?)
     }
 
-    fn deserialize_i32<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_i32<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_i32(self.parse_signed()?)
     }
 
-    fn deserialize_i64<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_i64<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_i64(self.parse_signed()?)
     }
 
-    fn deserialize_u8<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_u8<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_u8(self.parse_unsigned()?)
     }
 
-    fn deserialize_u16<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_u16<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_u16(self.parse_unsigned()?)
     }
 
-    fn deserialize_u32<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_u32<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_u32(self.parse_unsigned()?)
     }
 
-    fn deserialize_u64<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_u64<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_u64(self.parse_unsigned()?)
     }
 
-    fn deserialize_char<V>(self, _visitor: V) -> Result<V::Value>
+    fn deserialize_char<V>(self, _visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         unimplemented!()
     }
 
-    fn deserialize_str<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_str<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         visitor.visit_borrowed_str(self.parse_string()?)
     }
 
-    fn deserialize_string<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_string<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         self.deserialize_str(visitor)
     }
 
-    fn deserialize_identifier<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_identifier<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         self.deserialize_str(visitor)
     }
 
-    fn deserialize_seq<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_seq<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         Ok(visitor.visit_seq(self)?)
     }
 
-    fn deserialize_map<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_map<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
@@ -608,18 +627,18 @@ impl<'de, 'a> de::Deserializer<'de> for &'a mut Deserializer<'de> {
         _: &'static str,
         _: &'static [&'static str],
         visitor: V,
-    ) -> Result<V::Value>
+    ) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
         Ok(visitor.visit_map(self)?)
     }
 
-    fn deserialize_ignored_any<V>(self, visitor: V) -> Result<V::Value>
+    fn deserialize_ignored_any<V>(self, visitor: V) -> ParseResult<V::Value>
     where
         V: Visitor<'de>,
     {
-        let len = self.input.find('\n').ok_or(Error::Eof)?;
+        let len = self.input.find('\n').ok_or(ParseError::Eof)?;
         warn!("unknown option with value \"{}\"", &self.input[..len]);
         self.input = &self.input[len..];
         Ok(visitor.visit_none()?)
