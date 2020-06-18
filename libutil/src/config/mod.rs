@@ -273,6 +273,37 @@ impl NixConfig {
         }
         Ok(end_text)
     }
+
+    pub fn is_trusted_user(&self, user: &str, group: &str) -> bool {
+        for v in &self.trusted_users {
+            if v.starts_with('@') {
+                if &v[1..] == group {
+                    return true;
+                }
+            }
+            if v == "*" {
+                return true;
+            } else if v == user {
+                return true;
+            }
+        }
+        false
+    }
+    pub fn is_allowed_user(&self, user: &str, group: &str) -> bool {
+        for v in &self.allowed_users {
+            if v.starts_with('@') {
+                if &v[1..] == group {
+                    return true;
+                }
+            }
+            if v == "*" {
+                return true;
+            } else if v == user {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 fn default_store() -> String {

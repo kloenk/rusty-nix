@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use tokio::io;
-use tokio::net::UnixStream;
+use tokio::net::{UnixListener, UnixStream};
+use tokio::stream::StreamExt;
+
+use libstore::connection::Connection;
 
 #[macro_use]
 extern crate log;
@@ -113,7 +116,39 @@ impl NixDaemon {
     }
 
     async fn daemon_loop(self) -> CommandResult<()> {
-        println!("running loop");
+        std::env::set_current_dir("/")?;
+
+        // TODO: get rid of zombies
+
+        let mut listener: Option<UnixListener> = None;
+
+        if let Ok(listenFds) = std::env::var("LISTEN_FDS") {
+            let fd: i32 = listenFds.parse().unwrap();
+            let raw_fd: std::os::unix::net::UnixListener =
+                unsafe { std::os::unix::io::FromRawFd::from_raw_fd(fd) };
+            listener = UnixListener::from_std(raw_fd).ok();
+        } else {
+            let file = &self.nix_config.nix_daemon_socket_file;
+            info!("listening on {}", file);
+            // TODO: create dirs
+            listener = Some(UnixListener::bind(file)?);
+        }
+
+        let mut listener = listener.expect("ther is no listener");
+
+        while let Some(stream) = listener.next().await {
+            match stream {
+                Ok(stream) => {
+                    if let Err(e) = self.handle_connection(stream) {
+                        // TODO: print errors
+                        warn!("{}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!("Error accepting connection: {}", e);
+                }
+            }
+        }
 
         Ok(())
     }
@@ -123,5 +158,35 @@ impl NixDaemon {
             stdio: false,
             nix_config: config,
         }
+    }
+    fn handle_connection(&self, stream: UnixStream) -> CommandResult<()> {
+        let mut connection = Connection::new();
+
+        let creds = stream.peer_cred()?;
+
+        //let user = users::get_user_by_uid(creds.uid);
+        let user = match users::get_user_by_uid(creds.uid) {
+            Some(v) => v.name().to_string_lossy().to_string(),
+            None => "not allowed user".to_string(),
+        };
+        let group = match users::get_group_by_gid(creds.gid) {
+            Some(v) => v.name().to_string_lossy().to_string(),
+            None => "not allowed group".to_string(),
+        };
+
+        connection.trusted = self.nix_config.is_trusted_user(&user, &group);
+        connection.allowed = self.nix_config.is_allowed_user(&user, &group);
+
+        if !connection.allowed {
+            return Err(crate::error::CommandError::DisallowedUser { user: user });
+        }
+
+        info!(
+            "accepted connection from user {}{}",
+            user,
+            if connection.trusted { " (trusted)" } else { "" }
+        ); // TODO: pid
+
+        Ok(())
     }
 }

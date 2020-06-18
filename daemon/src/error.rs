@@ -7,6 +7,7 @@ custom_error! {
         Io{source: io::Error} = "IoError: {source}",
         UtilParse{source: libutil::config::error::Error} = "parsing error: {source}",
         Tokio{source: tokio::task::JoinError} = "tokio error: {source}",
+        DisallowedUser{user: String} = "User {user} is not allwod to connect to the Nix daemon",
 }
 
 impl CommandError {
@@ -15,6 +16,8 @@ impl CommandError {
             CommandError::Io { .. } => 2, // TODO: get from io::Error (source)
             CommandError::UtilParse { .. } => 3,
             CommandError::Tokio { .. } => 4,
+
+            CommandError::DisallowedUser { .. } => 200,
         }
     }
 }

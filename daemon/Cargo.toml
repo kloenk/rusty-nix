@@ -17,6 +17,7 @@ log = "0.4"
 env_logger = "0.6"
 tokio = { version = "0.2.21", features = [ "full", "uds" ] }
 futures = "0.3"
+users = "0.10"
 
 libstore = { path = "../libstore" }
 libutil = { path = "../libutil" }
