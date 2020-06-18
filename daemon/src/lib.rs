@@ -1,5 +1,7 @@
-use std::os::unix::net::UnixStream;
 use std::sync::Arc;
+
+use tokio::io;
+use tokio::net::UnixStream;
 
 #[macro_use]
 extern crate log;
@@ -73,22 +75,37 @@ impl NixDaemon {
     pub async fn run(self) -> CommandResult<()> {
         if self.stdio {
             // implement stdio for other store types
-            //let socket_path = "/nix/var/nix/daemon-socket/socket"; // FIXME: read from config
-            let stream = UnixStream::connect(&self.nix_config.nix_daemon_socket_file)?;
+            /*let stream = UnixStream::connect(&self.nix_config.nix_daemon_socket_file)?;
 
             let socket_arc = std::sync::Arc::new(stream);
             let (mut socket_tx, mut socket_rx) = (socket_arc.try_clone()?, socket_arc.try_clone()?);
 
             use std::io::{copy, stdin, stdout};
             use std::thread::spawn;
-            let connections = vec![
-                spawn(move || copy(&mut stdin(), &mut socket_tx)),
-                spawn(move || copy(&mut socket_rx, &mut stdout())),
+            let connections = vec![ // This is broken. Rewrite to async?
+                spawn(move || loop { copy(&mut stdin(), &mut socket_tx); } ),
+                spawn(move || loop { copy(&mut socket_rx, &mut stdout()); } ),
             ];
 
             for t in connections {
                 t.join().unwrap();
-            }
+            }*/
+            /*let socket_file = &self.nix_config.nix_daemon_socket_file;
+            debug!("stdio: connecting to socket {}", socket_file);
+
+            let mut stream = UnixStream::connect(socket_file).await?;
+            let (mut read, mut write) = stream.split();
+
+            let mut stdin = io::stdin();
+            let mut stdout = io::stdout();
+
+            warn!("copying");
+
+            //let join = futures::future::join_all(connections).await;
+            let join = futures::future::join(io::copy(&mut stdin, &mut write), io::copy(&mut read, &mut stdout)).await;
+
+            warn!("join: ${:?}", join);*/
+            unimplemented!();
         } else {
             self.daemon_loop().await?;
         }

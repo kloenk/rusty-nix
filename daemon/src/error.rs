@@ -6,6 +6,7 @@ custom_error! {
     pub CommandError
         Io{source: io::Error} = "IoError: {source}",
         UtilParse{source: libutil::config::error::Error} = "parsing error: {source}",
+        Tokio{source: tokio::task::JoinError} = "tokio error: {source}",
 }
 
 impl CommandError {
@@ -13,6 +14,7 @@ impl CommandError {
         match self {
             CommandError::Io { .. } => 2, // TODO: get from io::Error (source)
             CommandError::UtilParse { .. } => 3,
+            CommandError::Tokio { .. } => 4,
         }
     }
 }
