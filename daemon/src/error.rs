@@ -8,6 +8,8 @@ custom_error! {
         UtilParse{source: libutil::config::error::Error} = "parsing error: {source}",
         Tokio{source: tokio::task::JoinError} = "tokio error: {source}",
         DisallowedUser{user: String} = "User {user} is not allwod to connect to the Nix daemon",
+        InvalidMagic{} = "the magic number is invalid",
+        InvalidVersion{} = "the client version is to old",
 }
 
 impl CommandError {
@@ -18,6 +20,8 @@ impl CommandError {
             CommandError::Tokio { .. } => 4,
 
             CommandError::DisallowedUser { .. } => 200,
+            CommandError::InvalidMagic {} => 200,
+            CommandError::InvalidVersion {} => 200,
         }
     }
 }

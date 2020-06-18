@@ -1,6 +1,7 @@
+use std::convert::TryInto;
 use std::sync::Arc;
 
-use tokio::io;
+use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::stream::StreamExt;
 
@@ -139,7 +140,8 @@ impl NixDaemon {
         while let Some(stream) = listener.next().await {
             match stream {
                 Ok(stream) => {
-                    if let Err(e) = self.handle_connection(stream) {
+                    if let Err(e) = self.handle_connection(stream).await {
+                        // FIXME: multithreading!!!
                         // TODO: print errors
                         warn!("{}", e);
                     }
@@ -159,7 +161,8 @@ impl NixDaemon {
             nix_config: config,
         }
     }
-    fn handle_connection(&self, stream: UnixStream) -> CommandResult<()> {
+    async fn handle_connection(&self, stream: UnixStream) -> CommandResult<()> {
+        let mut stream = stream;
         let mut connection = Connection::new();
 
         let creds = stream.peer_cred()?;
@@ -186,6 +189,33 @@ impl NixDaemon {
             user,
             if connection.trusted { " (trusted)" } else { "" }
         ); // TODO: pid
+
+        // verify client version
+        let mut buffer: [u8; 10] = [0; 10];
+
+        stream.read(&mut buffer[..]).await?;
+
+        let magic = u32::from_le_bytes(buffer[0..4].try_into().unwrap());
+        if magic != libstore::connection::WORKER_MAGIC_1 {
+            return Err(crate::error::CommandError::InvalidMagic {});
+        }
+
+        let magic = u32::to_le_bytes(libstore::connection::WORKER_MAGIC_2);
+        let version = u16::to_le_bytes(libstore::connection::PROTOCOL_VERSION);
+        stream.write(&magic).await?;
+        stream.write(&[0, 0, 0, 0]).await?;
+        stream.write(&version).await?;
+        stream.write(&[0, 0, 0, 0, 0, 0]).await?;
+
+        stream.read(&mut buffer[..]).await?;
+        let version = u16::from_le_bytes(buffer[0..2].try_into().unwrap());
+        if version < 0x10a {
+            return Err(crate::error::CommandError::InvalidVersion {});
+        }
+
+        trace!("version an client matching");
+
+        // TODO: start tunnelloger
 
         Ok(())
     }
