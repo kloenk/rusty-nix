@@ -4,7 +4,16 @@ use crate::error::ConnectionError;
 use tokio::io::AsyncWriteExt;
 use tokio::net::unix::WriteHalf;
 
-pub const STDERR_LAST: [u8; 4] = [0x73, 0x74, 0x6c, 0x61];
+use byteorder::{ByteOrder, LittleEndian};
+
+pub const STDERR_NEXT: u64 = 0x6f6c6d67;
+pub const STDERR_READ: u64 = 0x64617461;
+pub const STDERR_WRITE: u64 = 0x64617416;
+pub const STDERR_LAST: u64 = 0x616c7473;
+pub const STDERR_ERROR: u64 = 0x63787470;
+pub const STDERR_START_ACTIVITY: u64 = 0x53545254;
+pub const STDERR_STOP_ACTIVITY: u64 = 0x53544f50;
+pub const STDERR_RESULT: u64 = 0x52534c54;
 
 pub enum WorkFinish {
     Done,
@@ -49,11 +58,18 @@ impl<'a> TunnelLogger<'a> {
         self.can_send_stderr = false;
 
         let mut writer = self.writer.write().unwrap(); // TODO: error handling?
-        if let WorkFinish::Error(v, s) = state {
-            unimplemented!();
+        let mut buf: [u8; 8] = [0; 8];
+        if let WorkFinish::Error(msg, s) = state {
+            LittleEndian::write_u64(&mut buf, STDERR_ERROR);
+            writer.write(&buf).await?;
+            writer.write(&msg.as_ref()).await?;
+            if s != 0 {
+                LittleEndian::write_u64(&mut buf, s as u64);
+                writer.write(&buf).await?;
+            }
         } else {
-            writer.write(&STDERR_LAST).await?;
-            writer.write(&[0, 0, 0, 0]).await?;
+            LittleEndian::write_u64(&mut buf, STDERR_LAST);
+            writer.write(&buf).await?;
         }
 
         writer.flush().await?;

@@ -6,8 +6,7 @@ use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
 pub struct LocalStore {
-    baseDir: String,
-    stateDir: String,
+    base_dir: String,
     params: std::collections::HashMap<String, String>,
 }
 
@@ -20,10 +19,13 @@ impl LocalStore {
         trace!("opening local store {}", path);
         std::fs::create_dir_all(path)?;
         Ok(Self {
-            baseDir: path.to_string(),
-            stateDir: format!("{}/var/nix", path),
+            base_dir: path.to_string(),
             params,
         })
+    }
+
+    pub fn get_state_dir(&self) -> String {
+        format!("{}/var/nix/", self.base_dir)
     }
 }
 
@@ -33,11 +35,11 @@ impl crate::Store for LocalStore {
         username: String,
         uid: u32,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let stateDir = self.stateDir.clone();
+        let state_dir = self.get_state_dir();
         LocalFutureObj::new(Box::new(async move {
             let dirs = vec![
-                format!("{}/profiles/per-user/{}", &stateDir, username),
-                format!("{}/gcroots/per-user/{}", &stateDir, username),
+                format!("{}/profiles/per-user/{}", &state_dir, username),
+                format!("{}/gcroots/per-user/{}", &state_dir, username),
             ];
 
             for dir in dirs {
