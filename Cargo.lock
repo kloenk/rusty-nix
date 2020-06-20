@@ -258,6 +258,8 @@ name = "libstore"
 version = "0.1.0"
 dependencies = [
  "custom_error",
+ "log",
+ "tokio",
 ]
 
 [[package]]

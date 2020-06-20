@@ -163,7 +163,6 @@ impl NixDaemon {
     }
     async fn handle_connection(&self, stream: UnixStream) -> CommandResult<()> {
         let mut stream = stream;
-        let mut connection = Connection::new();
 
         let creds = stream.peer_cred()?;
 
@@ -177,17 +176,16 @@ impl NixDaemon {
             None => "not allowed group".to_string(),
         };
 
-        connection.trusted = self.nix_config.is_trusted_user(&user, &group);
-        connection.allowed = self.nix_config.is_allowed_user(&user, &group);
+        let trusted = self.nix_config.is_trusted_user(&user, &group);
 
-        if !connection.allowed {
+        if !self.nix_config.is_allowed_user(&user, &group) {
             return Err(crate::error::CommandError::DisallowedUser { user: user });
         }
 
         info!(
             "accepted connection from user {}{}",
             user,
-            if connection.trusted { " (trusted)" } else { "" }
+            if trusted { " (trusted)" } else { "" }
         ); // TODO: pid
 
         // verify client version
@@ -215,7 +213,13 @@ impl NixDaemon {
 
         trace!("version an client matching");
 
+        let store = libstore::openStore(&self.nix_config.store, std::collections::HashMap::new()).unwrap();
+        
+
         // TODO: start tunnelloger
+        let mut connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);
+
+        connection.run().await.unwrap(); // FIXME: error
 
         Ok(())
     }

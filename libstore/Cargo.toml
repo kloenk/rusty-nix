@@ -9,3 +9,5 @@ license = "LGPL-2.1-only"
 
 [dependencies]
 custom_error = "1.7"
+tokio = { version = "0.2.21", features = [ "full" ] }
+log = "*"

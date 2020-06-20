@@ -1,25 +1,46 @@
+use std::sync::{RwLock, Arc};
+
+use tokio::net::unix::{ReadHalf, WriteHalf};
+use tokio::net::UnixStream;
+
 pub const WORKER_MAGIC_1: u32 = 0x6e697863;
 pub const WORKER_MAGIC_2: u32 = 0x6478696f;
 pub const PROTOCOL_VERSION: u16 = 0x115;
 
 pub mod logger;
 
-pub struct Connection {
+pub struct Connection<'a> {
     pub trusted: bool,
-    pub allowed: bool,
+
+    logger: logger::TunnelLogger<'a>,
+
+    writer: Arc<RwLock<WriteHalf<'a>>>,
+    reader: Arc<RwLock<ReadHalf<'a>>>,
+
+    uid: u32,
+    u_name: String,
+
+    store: Box<dyn crate::Store>,
 }
 
-impl Connection {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
+impl<'a> Connection<'a> {
+    pub fn new(trusted: bool, client_version: u16, stream: &'a mut UnixStream, store: Box<dyn crate::Store>, uid: u32, u_name: String) -> Self {
+        let (reader, writer) = stream.split();
+        let reader = Arc::new(RwLock::new(reader));
+        let writer = Arc::new(RwLock::new(writer));
 
-impl Default for Connection {
-    fn default() -> Self {
+        let logger = logger::TunnelLogger::new(client_version, writer.clone());
         Self {
-            trusted: false,
-            allowed: false,
+            trusted, logger, reader, writer, store, uid, u_name,
         }
+    }
+
+    pub async fn run(mut self) -> Result<(), crate::error::StoreError> {
+        self.logger.start_work().await?;
+
+        
+
+        self.store.create_user(&self.u_name, self.uid).await?;
+        Ok(())
     }
 }
