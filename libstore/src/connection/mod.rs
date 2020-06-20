@@ -1,5 +1,6 @@
-use std::sync::{RwLock, Arc};
+use std::sync::{Arc, RwLock};
 
+use tokio::io::AsyncReadExt;
 use tokio::net::unix::{ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
@@ -24,23 +25,44 @@ pub struct Connection<'a> {
 }
 
 impl<'a> Connection<'a> {
-    pub fn new(trusted: bool, client_version: u16, stream: &'a mut UnixStream, store: Box<dyn crate::Store>, uid: u32, u_name: String) -> Self {
+    pub fn new(
+        trusted: bool,
+        client_version: u16,
+        stream: &'a mut UnixStream,
+        store: Box<dyn crate::Store>,
+        uid: u32,
+        u_name: String,
+    ) -> Self {
         let (reader, writer) = stream.split();
         let reader = Arc::new(RwLock::new(reader));
         let writer = Arc::new(RwLock::new(writer));
 
         let logger = logger::TunnelLogger::new(client_version, writer.clone());
         Self {
-            trusted, logger, reader, writer, store, uid, u_name,
+            trusted,
+            logger,
+            reader,
+            writer,
+            store,
+            uid,
+            u_name,
         }
     }
 
     pub async fn run(mut self) -> Result<(), crate::error::StoreError> {
         self.logger.start_work().await?;
 
-        
+        self.store
+            .create_user(self.u_name.clone(), self.uid)
+            .await?;
+        self.logger.stop_work(logger::WorkDone).await?;
 
-        self.store.create_user(&self.u_name, self.uid).await?;
+        let mut buffer: [u8; 32] = [0; 32];
+        let mut reader = self.reader.write().unwrap();
+        reader.read(&mut buffer);
+
+        println!("read: {:?}", buffer);
+
         Ok(())
     }
 }
