@@ -226,8 +226,9 @@ impl NixDaemon {
             // FIXME: error
             Err(e) => {
                 trace!("shutting down stream");
+                info!("got error {} from daemon loop", e);
                 stream.shutdown(std::net::Shutdown::Both)?;
-                //return Err(e);
+                //Err(e);
             }
             Ok(_) => {}
         }

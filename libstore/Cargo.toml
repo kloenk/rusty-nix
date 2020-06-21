@@ -3,7 +3,7 @@ name = "libstore"
 version = "0.1.0"
 authors = ["Finn Behrens <me@kloenk.de>"]
 edition = "2018"
-license = "LGPL-2.1-only"
+license = "GPL-3.0-or-later"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -13,3 +13,8 @@ tokio = { version = "0.2.21", features = [ "full" ] }
 log = "*"
 futures = "*"
 byteorder = "1"
+chrono = "0.4"
+lru_time_cache = "*"
+rusqlite = "*"
+
+libutil = { path = "../libutil" }

@@ -8,6 +8,9 @@ custom_error! {
         Io{source: io::Error} = "IoError: {source}",
         ConnectionError{source: ConnectionError} = "ConnectionError: {source}",
         InvalidStoreUri{uri: String} = "InvalidStoreUri: {uri}",
+        NotInStore{path: String} = "path \"{path}\" is not in the Nix store",
+        UtilError{source: libutil::error::UtilError} = "UtilError: {source}",
+        SqlError{source: rusqlite::Error} = "SQLError: {source}",
 }
 
 custom_error! {

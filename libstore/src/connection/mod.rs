@@ -4,7 +4,7 @@ use byteorder::{ByteOrder, LittleEndian};
 
 use log::{debug, error, trace};
 
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
@@ -118,6 +118,7 @@ impl<'a> Connection<'a> {
         match command {
             WorkerOp::WopInvalidRequest => Ok(()),
             WorkerOp::WopSetOptions => self.set_options().await,
+            WorkerOp::WopQueryPathInfo => self.query_path_info().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -150,9 +151,33 @@ impl<'a> Connection<'a> {
             settings.overrides.insert(name, Data::String(value));
         }
 
+        self.logger.start_work().await?;
         println!("settings: {:?}", settings);
+        // FIXME: apply settings (when not recursive)
+        self.logger.stop_work(logger::WorkDone).await?;
 
         Ok(())
+    }
+
+    async fn query_path_info(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        let path = std::path::PathBuf::from(&path);
+        trace!("queriying path info for {}", path.display());
+        self.logger.start_work().await?;
+        let info = self.store.query_path_info(path).await;
+        self.logger.stop_work(logger::WorkDone).await?;
+
+        match info {
+            Err(e) => {
+                trace!("no path info: {}", e);
+                let mut writer = self.writer.write().unwrap();
+                let buf: [u8; 8] = [0; 8];
+                writer.write(&buf).await?;
+            }
+            Ok(v) => {}
+        }
+
+        unimplemented!()
     }
 
     async fn read_int(&self) -> std::io::Result<u64> {
