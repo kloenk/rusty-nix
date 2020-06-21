@@ -7,6 +7,7 @@ use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
 pub mod local_store;
+pub mod protocol;
 
 pub trait Store {
     fn create_user<'a>(

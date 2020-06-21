@@ -211,15 +211,26 @@ impl NixDaemon {
             return Err(crate::error::CommandError::InvalidVersion {});
         }
 
+        stream.read(&mut buffer[..]).await?;
+        stream.read(&mut buffer[..]).await?;
+
         trace!("version an client matching");
 
         let store =
             libstore::openStore(&self.nix_config.store, std::collections::HashMap::new()).unwrap();
 
         // TODO: start tunnelloger
-        let mut connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);
+        let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);
 
-        connection.run().await.unwrap(); // FIXME: error
+        match connection.run().await {
+            // FIXME: error
+            Err(e) => {
+                trace!("shutting down stream");
+                stream.shutdown(std::net::Shutdown::Both)?;
+                //return Err(e);
+            }
+            Ok(_) => {}
+        }
 
         Ok(())
     }
