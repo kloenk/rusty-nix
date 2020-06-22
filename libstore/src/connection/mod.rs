@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{ReadHalf, WriteHalf};
@@ -173,11 +173,49 @@ impl<'a> Connection<'a> {
                 let mut writer = self.writer.write().unwrap();
                 let buf: [u8; 8] = [0; 8];
                 writer.write(&buf).await?;
+                drop(writer);
             }
-            Ok(v) => {}
+            Ok(v) => {
+                warn!("todo: return valid path info");
+
+                self.write_u64(1).await?;
+                if let Some(v) = v.deriver {
+                    self.write_string(&self.store.print_store_path(v)?).await?;
+                }
+                self.write_string(&v.nar_hash.to_string()).await?;
+                // TODO: writeStorePaths references
+                self.write_u64(v.registration_time.timestamp() as u64)
+                    .await?;
+                if let Some(v) = v.narSize {
+                    self.write_u64(v).await?;
+                } else {
+                    self.write_u64(0).await?;
+                }
+
+                self.write_bool(v.ultimate).await?;
+                self.write_string(&v.sigs.join(" ")).await?;
+                if let Some(ca) = v.ca {
+                    self.write_string(&ca).await?;
+                } else {
+                    self.write_string("").await?;
+                }
+
+                /*let mut buf: Vec<u8> = Vec::new();
+                buf.push(1);
+                if let Some(v) = v.deriver {
+                    buf.extend_from_slice(self.store.print_store_path(v)?.as_bytes());
+                }
+                // TODO: change to sha2
+                buf.extend_from_slice(&v.nar_hash.to_string().as_bytes());
+                // TODO: write store paths
+
+                let mut writer = self.writer.write().unwrap();
+                writer.write(&buf).await?;
+                drop(writer);*/
+            }
         }
 
-        unimplemented!()
+        Ok(())
     }
 
     async fn read_int(&self) -> std::io::Result<u64> {
@@ -189,24 +227,62 @@ impl<'a> Connection<'a> {
         Ok(LittleEndian::read_u64(&buf))
     }
 
+    async fn write_u64(&self, v: u64) -> EmptyResult {
+        let mut buf: [u8; 8] = [0; 8];
+        LittleEndian::write_u64(&mut buf, v);
+
+        let mut writer = self.writer.write().unwrap();
+        writer.write(&buf).await?;
+
+        Ok(())
+    }
+
+    async fn write_bool(&self, v: bool) -> EmptyResult {
+        if v {
+            self.write_u64(1).await
+        } else {
+            self.write_u64(0).await
+        }
+    }
+
     async fn read_string(&self) -> Result<String, StoreError> {
-        let len = self.read_int().await?; // FIXME: orignal uses size_t??
-        let mut buf: [u8; 100] = [0; 100];
+        // TODO: this is very ugly. Find some better way to read_exact()
+        let len = self.read_int().await?; // TODO: orignal uses size_t??
+
+        if len > 1024 {
+            return Err(StoreError::StringToLong { len: len as usize });
+        }
 
         trace!("reading string with len {}", len);
 
+        let mut buf: [u8; 1024] = [0; 1024]; // FIME: bigger buffer size?
+
         let mut reader = self.reader.write().unwrap();
         reader.read_exact(&mut buf[0..len as usize]).await?;
-        drop(reader); // release reader
+        drop(reader);
 
         let value = String::from_utf8_lossy(&buf[0..len as usize]).to_string();
 
-        // FIXME: read padding
+        // read padding
         self.read_padding(len).await?;
 
         trace!("read string {}", value);
 
         Ok(value)
+    }
+
+    async fn write_string(&self, str: &str) -> EmptyResult {
+        let len = str.len();
+
+        self.write_u64(len as u64).await?;
+
+        let mut writer = self.writer.write().unwrap();
+        writer.write(str.as_bytes()).await?;
+        drop(writer);
+
+        self.write_padding(len).await?;
+
+        Ok(())
     }
 
     async fn read_padding(&self, len: u64) -> EmptyResult {
@@ -218,6 +294,18 @@ impl<'a> Connection<'a> {
             reader.read_exact(&mut buf[0..len]).await?;
             // TODO: check for non 0 values
         }
+        Ok(())
+    }
+
+    async fn write_padding(&self, len: usize) -> EmptyResult {
+        if len % 8 != 0 {
+            let buf: [u8; 8] = [0; 8];
+            let len = 8 - (len % 8);
+
+            let mut writer = self.writer.write().unwrap();
+            writer.write(&buf[0..len]).await?;
+        }
+
         Ok(())
     }
 }

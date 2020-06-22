@@ -133,6 +133,13 @@ impl NixDaemon {
             info!("listening on {}", file);
             // TODO: create dirs
             listener = Some(UnixListener::bind(file)?);
+
+            // set permissions
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o666);
+            std::fs::set_permissions(&file, perms)?;
+
+            // TODO: exit trap to remove socket
         }
 
         let mut listener = listener.expect("ther is no listener");

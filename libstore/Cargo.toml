@@ -16,5 +16,6 @@ byteorder = "1"
 chrono = "0.4"
 lru_time_cache = "*"
 rusqlite = "*"
+sha2 = "*"
 
 libutil = { path = "../libutil" }

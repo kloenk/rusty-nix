@@ -11,18 +11,19 @@ use chrono::NaiveDateTime;
 pub mod local_store;
 pub mod protocol;
 
+#[derive(Debug)]
 pub struct ValidPathInfo {
     pub path: std::path::PathBuf,
     pub deriver: Option<std::path::PathBuf>,
-    pub narHash: String,    // TODO: type narHash
+    pub nar_hash: Hash,     // TODO: type narHash
     pub references: String, // TODO: type StorePathSets
     pub registration_time: NaiveDateTime,
-    pub narSize: u64, // 0 = unknown
-    id: u64,          // internal use only
+    pub narSize: Option<u64>,
+    pub id: u64, // internal use only
 
     /* Whether the path is ultimately trusted, that is, it's a
     derivation output that was built locally. */
-    ultimate: bool,
+    pub ultimate: bool,
 
     pub sigs: Vec<String>, // not necessarily verified
 
@@ -52,7 +53,7 @@ pub struct ValidPathInfo {
        * ‘fixed:<r?>:<ht>:<h>’: For paths computed by
          makeFixedOutputPath() / addToStore().
     */
-    pub ca: String,
+    pub ca: Option<String>,
 }
 
 impl ValidPathInfo {
@@ -91,11 +92,34 @@ impl ValidPathInfo {
 impl PartialEq for ValidPathInfo {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
-            && self.narHash == other.narHash
+            && self.nar_hash == other.nar_hash
             && self.references == other.references
     }
 }
 impl Eq for ValidPathInfo {}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum Hash {
+    sha256(String), // TOOD: use sha256 type
+}
+
+impl std::convert::From<&str> for Hash {
+    fn from(v: &str) -> Self {
+        let v: Vec<&str> = v.split(':').collect();
+        match *v.get(0).unwrap_or(&"") {
+            "sha256" => Hash::sha256(v.get(1).unwrap().to_string()),
+            _ => panic!("invalid hash"),
+        }
+    }
+}
+
+impl std::fmt::Display for Hash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Hash::sha256(v) => write!(f, "{}", v), // no sha256:<hash>??
+        }
+    }
+}
 
 pub trait Store {
     fn create_user<'a>(
@@ -112,6 +136,13 @@ pub trait Store {
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 
     fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
+
+    fn print_store_path<'a>(&'a self, p: std::path::PathBuf) -> Result<String, StoreError> {
+        // TODO: C++ adds `storeDir + "/"` infront??
+        Ok(p.display().to_string())
+    }
+
+    //fn print_store_paths<'a>('a self, p: Vec<>)
 }
 
 pub fn openStore(

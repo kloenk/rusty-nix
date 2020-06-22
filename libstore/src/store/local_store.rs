@@ -109,15 +109,46 @@ impl crate::Store for LocalStore {
             trace!("queriying for {} in sqlite", path.display());
 
             let mut data = stm.query_map(&[&path.to_str()], |row| {
-                println!("sqlite map");
-                let str: u64 = row.get::<usize, isize>(0)? as u64;
-                println!("row: {:?}", str);
-                Ok("foobar") // TODO: return valid Path Info
+                let id: u64 = row.get::<usize, isize>(0)? as u64;
+                let nar_hash: crate::store::Hash = row
+                    .get::<usize, String>(1)
+                    .map(|v| crate::store::Hash::from(v.as_str()))?;
+                let registration_time: chrono::NaiveDateTime = row
+                    .get::<usize, isize>(2)
+                    .map(|v| chrono::NaiveDateTime::from_timestamp(v as i64, 0))?;
+                let deriver: Option<std::path::PathBuf> = row
+                    .get::<usize, String>(3)
+                    .map(|v| std::path::PathBuf::from(v))
+                    .ok();
+                let narSize: Option<u64> = row.get::<usize, isize>(4).map(|v| v as u64).ok();
+                let ultimate: bool = row.get::<usize, isize>(5)? != 0;
+                let sigs: Vec<String> = row
+                    .get::<usize, String>(6)
+                    .map(|v| v.split(' ').map(|v| v.to_string()).collect())
+                    .unwrap_or(Vec::new());
+                let ca: Option<String> = row.get::<usize, String>(7).ok();
+                Ok(crate::store::ValidPathInfo {
+                    path: std::path::PathBuf::from(&path),
+                    deriver,
+                    nar_hash,
+                    references: String::new(), // TODO: referecnes foo
+                    registration_time,
+                    narSize,
+                    id,
+                    ultimate,
+                    sigs,
+                    ca,
+                }) // TODO: return valid Path Info
             })?;
 
-            println!("data: {:?}", data.next().unwrap().unwrap()); // TODO: handle data
+            //let data = data.next().ok_or_else(|| -> Result<Valid> { Err(StoreError::NotInStore{ path: path.display().to_string(), } ) } )).unwrap();
+            //let data = data?;
+            let data = data.next().ok_or(StoreError::NotInStore {
+                path: path.display().to_string(),
+            })??;
+            trace!("{:?}", data);
 
-            unimplemented!()
+            Ok(data) // TODO: no unwrap
         }))
     }
 }

@@ -6,6 +6,7 @@ use custom_error::custom_error;
 custom_error! {
     pub StoreError
         Io{source: io::Error} = "IoError: {source}",
+        StringToLong{len: usize} = "string is to long",
         ConnectionError{source: ConnectionError} = "ConnectionError: {source}",
         InvalidStoreUri{uri: String} = "InvalidStoreUri: {uri}",
         NotInStore{path: String} = "path \"{path}\" is not in the Nix store",
