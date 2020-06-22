@@ -119,6 +119,7 @@ impl<'a> Connection<'a> {
             WorkerOp::WopInvalidRequest => Ok(()),
             WorkerOp::WopSetOptions => self.set_options().await,
             WorkerOp::WopQueryPathInfo => self.query_path_info().await,
+            WorkerOp::WopIsValidPath => self.is_valid_path().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -162,7 +163,7 @@ impl<'a> Connection<'a> {
     async fn query_path_info(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
         let path = std::path::PathBuf::from(&path);
-        trace!("queriying path info for {}", path.display());
+        debug!("queriying path info for {}", path.display());
         self.logger.start_work().await?;
         let info = self.store.query_path_info(path).await;
         self.logger.stop_work(logger::WorkDone).await?;
@@ -180,10 +181,13 @@ impl<'a> Connection<'a> {
 
                 self.write_u64(1).await?;
                 if let Some(v) = v.deriver {
+                    self.write_string(&self.store.print_store_path(&v)?).await?;
+                }
+                self.write_string(&v.nar_hash.to_string()).await?; // TODO: change to sha2 crate
+                self.write_u64(v.references.len() as u64).await?;
+                for v in &v.references {
                     self.write_string(&self.store.print_store_path(v)?).await?;
                 }
-                self.write_string(&v.nar_hash.to_string()).await?;
-                // TODO: writeStorePaths references
                 self.write_u64(v.registration_time.timestamp() as u64)
                     .await?;
                 if let Some(v) = v.narSize {
@@ -199,25 +203,27 @@ impl<'a> Connection<'a> {
                 } else {
                     self.write_string("").await?;
                 }
-
-                /*let mut buf: Vec<u8> = Vec::new();
-                buf.push(1);
-                if let Some(v) = v.deriver {
-                    buf.extend_from_slice(self.store.print_store_path(v)?.as_bytes());
-                }
-                // TODO: change to sha2
-                buf.extend_from_slice(&v.nar_hash.to_string().as_bytes());
-                // TODO: write store paths
-
-                let mut writer = self.writer.write().unwrap();
-                writer.write(&buf).await?;
-                drop(writer);*/
             }
         }
 
         Ok(())
     }
 
+    async fn is_valid_path(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        let path = std::path::PathBuf::from(&path);
+
+        debug!("checking if {} is a valid path", path.display());
+
+        self.logger.start_work().await?;
+        let valid = self.store.is_valid_path(&path).await?;
+        self.logger.stop_work(logger::WorkDone).await?;
+        self.write_bool(valid).await?;
+
+        Ok(())
+    }
+
+    // TODO: maybe implement own Async{Read,Write}Ext
     async fn read_int(&self) -> std::io::Result<u64> {
         let mut reader = self.reader.write().unwrap();
         let mut buf: [u8; 8] = [0; 8];
@@ -273,6 +279,8 @@ impl<'a> Connection<'a> {
 
     async fn write_string(&self, str: &str) -> EmptyResult {
         let len = str.len();
+
+        trace!("writing string {} with len {}", str, len);
 
         self.write_u64(len as u64).await?;
 

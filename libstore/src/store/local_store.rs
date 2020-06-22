@@ -82,6 +82,35 @@ impl crate::Store for LocalStore {
         }))
     }
 
+    fn is_valid_path<'a>(
+        &'a mut self,
+        path: &'a std::path::Path,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if path.to_str().unwrap() == "" {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+
+            let path = path.canonicalize()?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+
+            let mut sqlite = self.sqlite.write().unwrap();
+            let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
+
+            let mut data = stm
+                .query_row(&[&path.to_str()], |row| Ok(true))
+                .unwrap_or(false);
+
+            Ok(data)
+        }))
+    }
+
     fn query_path_info<'a>(
         &'a mut self,
         path: std::path::PathBuf,
@@ -121,7 +150,7 @@ impl crate::Store for LocalStore {
                     .map(|v| std::path::PathBuf::from(v))
                     .ok();
                 let narSize: Option<u64> = row.get::<usize, isize>(4).map(|v| v as u64).ok();
-                let ultimate: bool = row.get::<usize, isize>(5)? != 0;
+                let ultimate: bool = row.get::<usize, isize>(5).unwrap_or(0) != 0;
                 let sigs: Vec<String> = row
                     .get::<usize, String>(6)
                     .map(|v| v.split(' ').map(|v| v.to_string()).collect())
@@ -131,7 +160,7 @@ impl crate::Store for LocalStore {
                     path: std::path::PathBuf::from(&path),
                     deriver,
                     nar_hash,
-                    references: String::new(), // TODO: referecnes foo
+                    references: Vec::new(), // TODO: referecnes foo
                     registration_time,
                     narSize,
                     id,
@@ -143,9 +172,30 @@ impl crate::Store for LocalStore {
 
             //let data = data.next().ok_or_else(|| -> Result<Valid> { Err(StoreError::NotInStore{ path: path.display().to_string(), } ) } )).unwrap();
             //let data = data?;
-            let data = data.next().ok_or(StoreError::NotInStore {
+            let mut data = data.next().ok_or(StoreError::NotInStore {
                 path: path.display().to_string(),
             })??;
+
+            let mut ref_stm = sqlite.prepare("SELECT reference FROM Refs WHERE referrer = (?);")?;
+            let refs = ref_stm.query_map(&[data.id as isize], |row| {
+                let reffercens = row.get::<usize, isize>(0)? as usize;
+                Ok(reffercens)
+            })?;
+
+            let mut stm = sqlite.prepare("SELECT path FROM ValidPaths WHERE id = (?);")?;
+
+            for v in refs {
+                let v = v? as isize;
+                if v as u64 == data.id {
+                    continue;
+                } // has itsself as refferencse
+                let row = stm.query_row(&[v], |row| {
+                    let path = std::path::PathBuf::from(row.get::<usize, String>(0)?);
+                    Ok(path)
+                })?;
+                data.references.push(row);
+            }
+
             trace!("{:?}", data);
 
             Ok(data) // TODO: no unwrap

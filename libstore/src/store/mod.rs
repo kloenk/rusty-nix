@@ -15,8 +15,8 @@ pub mod protocol;
 pub struct ValidPathInfo {
     pub path: std::path::PathBuf,
     pub deriver: Option<std::path::PathBuf>,
-    pub nar_hash: Hash,     // TODO: type narHash
-    pub references: String, // TODO: type StorePathSets
+    pub nar_hash: Hash,                      // TODO: type narHash
+    pub references: Vec<std::path::PathBuf>, // TODO: type StorePathSets
     pub registration_time: NaiveDateTime,
     pub narSize: Option<u64>,
     pub id: u64, // internal use only
@@ -133,11 +133,16 @@ pub trait Store {
         path: std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
+    fn is_valid_path<'a>(
+        &'a mut self,
+        path: &'a std::path::Path,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
+
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 
     fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 
-    fn print_store_path<'a>(&'a self, p: std::path::PathBuf) -> Result<String, StoreError> {
+    fn print_store_path<'a>(&'a self, p: &'a std::path::Path) -> Result<String, StoreError> {
         // TODO: C++ adds `storeDir + "/"` infront??
         Ok(p.display().to_string())
     }
