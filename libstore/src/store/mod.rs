@@ -25,6 +25,7 @@ pub struct ValidPathInfo {
     derivation output that was built locally. */
     pub ultimate: bool,
 
+    // TODO: maybe add a type which sepperates signer from signature
     pub sigs: Vec<String>, // not necessarily verified
 
     /* If non-empty, an assertion that the path is content-addressed,

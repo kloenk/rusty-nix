@@ -120,6 +120,10 @@ impl<'a> Connection<'a> {
             WorkerOp::WopSetOptions => self.set_options().await,
             WorkerOp::WopQueryPathInfo => self.query_path_info().await,
             WorkerOp::WopIsValidPath => self.is_valid_path().await,
+            WorkerOp::WopAddTempRoot => self.add_tmp_root().await,
+            WorkerOp::WopAddIndirectRoot => self.add_indirect_root().await,
+            WorkerOp::WopSyncWithGC => self.sync_with_gc().await,
+            WorkerOp::WopAddToStoreNar => self.add_to_store_nar().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -197,7 +201,7 @@ impl<'a> Connection<'a> {
                 }
 
                 self.write_bool(v.ultimate).await?;
-                self.write_string(&v.sigs.join(" ")).await?;
+                self.write_strings(&v.sigs).await?;
                 if let Some(ca) = v.ca {
                     self.write_string(&ca).await?;
                 } else {
@@ -223,6 +227,78 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+    async fn add_tmp_root(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        let path = std::path::PathBuf::from(&path);
+
+        debug!("adding temp root for {}", path.display());
+
+        self.logger.start_work().await?;
+        warn!("implement add temp root"); // TODO: add temp root
+                                          //self.store.add_temp_root(&path).await?;
+        self.logger.stop_work(logger::WorkDone).await?;
+        self.write_u64(1).await?;
+
+        Ok(())
+    }
+
+    async fn add_indirect_root(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        let path = std::path::PathBuf::from(&path);
+
+        debug!("adding indirect root for {}", path.display());
+
+        self.logger.start_work().await?;
+        // TODO: store.add_indirect_root(&path).await?;
+        warn!("implement indirect root");
+        self.logger.stop_work(logger::WorkDone).await?;
+        self.write_u64(1).await?;
+
+        Ok(())
+    }
+
+    async fn sync_with_gc(&mut self) -> EmptyResult {
+        debug!("syncing with gc");
+
+        self.logger.start_work().await?;
+        // TODO: store.add_indirect_root(&path).await?;
+        warn!("implement gc sync");
+        self.logger.stop_work(logger::WorkDone).await?;
+        self.write_u64(1).await?;
+
+        Ok(())
+    }
+
+    async fn add_to_store_nar(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        let path = std::path::PathBuf::from(&path);
+
+        //let path = store.get_path_info(&path).await?; // TODO
+
+        let deriver = self.read_string().await?;
+        let deriver = if deriver == "" {
+            None
+        } else {
+            Some(
+                self.store
+                    .print_store_path(&std::path::PathBuf::from(deriver))?,
+            )
+        };
+
+        debug!(
+            "add {} to store{}",
+            path.display(),
+            if let Some(v) = deriver {
+                format!(" (deriver: {})", v)
+            } else {
+                "".to_string()
+            }
+        );
+
+        unimplemented!();
+        Ok(())
+    }
+
     // TODO: maybe implement own Async{Read,Write}Ext
     async fn read_int(&self) -> std::io::Result<u64> {
         let mut reader = self.reader.write().unwrap();
@@ -234,6 +310,7 @@ impl<'a> Connection<'a> {
     }
 
     async fn write_u64(&self, v: u64) -> EmptyResult {
+        trace!("write the number {}", v);
         let mut buf: [u8; 8] = [0; 8];
         LittleEndian::write_u64(&mut buf, v);
 
@@ -280,7 +357,7 @@ impl<'a> Connection<'a> {
     async fn write_string(&self, str: &str) -> EmptyResult {
         let len = str.len();
 
-        trace!("writing string {} with len {}", str, len);
+        trace!("writing string '{}' with len {}", str, len);
 
         self.write_u64(len as u64).await?;
 
@@ -289,6 +366,16 @@ impl<'a> Connection<'a> {
         drop(writer);
 
         self.write_padding(len).await?;
+
+        Ok(())
+    }
+
+    async fn write_strings(&self, v: &Vec<String>) -> EmptyResult {
+        self.write_u64(v.len() as u64).await?;
+
+        for v in v {
+            self.write_string(v).await?;
+        }
 
         Ok(())
     }
@@ -309,6 +396,7 @@ impl<'a> Connection<'a> {
         if len % 8 != 0 {
             let buf: [u8; 8] = [0; 8];
             let len = 8 - (len % 8);
+            trace!("write a padding of {} zeros", len);
 
             let mut writer = self.writer.write().unwrap();
             writer.write(&buf[0..len]).await?;
