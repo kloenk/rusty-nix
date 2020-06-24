@@ -271,9 +271,8 @@ impl<'a> Connection<'a> {
 
     async fn add_to_store_nar(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
-        let path = std::path::PathBuf::from(&path);
-
-        //let path = store.get_path_info(&path).await?; // TODO
+        //let path = std::path::PathBuf::from(&path);
+        let path = super::store::ValidPathInfo::from(path);
 
         let deriver = self.read_string().await?;
         let deriver = if deriver == "" {
@@ -287,7 +286,7 @@ impl<'a> Connection<'a> {
 
         debug!(
             "add {} to store{}",
-            path.display(),
+            path,
             if let Some(v) = deriver {
                 format!(" (deriver: {})", v)
             } else {

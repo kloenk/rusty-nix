@@ -90,6 +90,37 @@ impl ValidPathInfo {
     virtual ~ValidPathInfo() { }*/
 }
 
+impl std::convert::From<String> for ValidPathInfo {
+    fn from(v: String) -> Self {
+        //let nar_hash: Vec<char> = v.chars().collect();
+        //let nar_hash: &[char] = &nar_hash[v.find("/")..v.find("-")];
+        let nar_hash = v
+            .get(v.find("/").unwrap_or(0)..v.find("-").unwrap_or(0))
+            .unwrap_or("");
+        //let nar_hash = Hash::from(&nar_hash);
+        let nar_hash = Hash::sha256(nar_hash.to_string());
+        Self {
+            path: std::path::PathBuf::from(&v),
+            deriver: None,
+            nar_hash,
+            references: Vec::new(),
+            registration_time: chrono::NaiveDateTime::from_timestamp(0, 0), // TODO: ??
+            narSize: None,
+            id: 0,
+            ultimate: false,
+            sigs: Vec::new(),
+            ca: None,
+        }
+    }
+}
+
+impl std::fmt::Display for ValidPathInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // TODO: more verbose output?
+        write!(f, "validPath:{}", self.path.display())
+    }
+}
+
 impl PartialEq for ValidPathInfo {
     fn eq(&self, other: &Self) -> bool {
         self.path == other.path
