@@ -12,6 +12,7 @@ custom_error! {
         NotInStore{path: String} = "path \"{path}\" is not in the Nix store",
         UtilError{source: libutil::error::UtilError} = "UtilError: {source}",
         SqlError{source: rusqlite::Error} = "SQLError: {source}",
+        OsError{ call: String, ret: i32 } = "Os Error: {call}: {ret}",
 }
 
 custom_error! {

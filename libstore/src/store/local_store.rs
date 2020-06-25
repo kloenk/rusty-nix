@@ -75,7 +75,14 @@ impl crate::Store for LocalStore {
                 use std::os::unix::fs::PermissionsExt;
                 let perms = std::fs::Permissions::from_mode(0o755);
                 std::fs::set_permissions(&dir, perms)?;
-                // TODO: chown
+                let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
+                let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
+                if chown != 0 {
+                    return Err(StoreError::OsError {
+                        call: String::from("chown"),
+                        ret: chown,
+                    });
+                }
             }
 
             Ok(())

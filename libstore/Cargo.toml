@@ -17,5 +17,6 @@ chrono = "0.4"
 lru_time_cache = "*"
 rusqlite = "*"
 sha2 = "*"
+libc = "*"
 
 libutil = { path = "../libutil" }
