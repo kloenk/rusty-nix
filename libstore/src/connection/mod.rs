@@ -439,3 +439,11 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 }
+
+// This trivial implementation of `drop` adds a print to console.
+impl<'a> Drop for Connection<'a> {
+    fn drop(&mut self) {
+        //println!("> Dropping {}", self.name);
+        debug!("dropping Connecton");
+    }
+}

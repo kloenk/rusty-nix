@@ -224,8 +224,9 @@ impl NixDaemon {
 
         trace!("version an client matching");
 
-        let store =
-            libstore::openStore(&self.nix_config.store, std::collections::HashMap::new()).unwrap();
+        let store = libstore::openStore(&self.nix_config.store, std::collections::HashMap::new())
+            .await
+            .unwrap();
 
         // TODO: start tunnelloger
         let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);

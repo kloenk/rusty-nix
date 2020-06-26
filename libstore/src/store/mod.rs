@@ -165,6 +165,11 @@ pub trait Store {
         path: &'a std::path::Path,
     ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
 
+    fn delete_path<'a>(
+        &'a mut self,
+        path: &std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
     fn add_to_store<'a>(
         &'a mut self,
         //source,
@@ -172,8 +177,6 @@ pub trait Store {
         repair: bool,
         check_sigs: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
-
-    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn add_temp_root<'a>(
         &'a mut self,
@@ -192,12 +195,12 @@ pub trait Store {
     //fn print_store_paths<'a>('a self, p: Vec<>)
 }
 
-pub fn openStore(
+pub async fn openStore(
     store_uri: &str,
     params: std::collections::HashMap<String, String>,
 ) -> Result<Box<dyn Store>, StoreError> {
     if store_uri == "auto" {
-        let store = local_store::LocalStore::openStore("/nix/", params)?;
+        let store = local_store::LocalStore::openStore("/nix/", params).await?;
         return Ok(Box::new(store));
     }
 
@@ -209,6 +212,6 @@ pub fn openStore(
     }
 
     let path = &store_uri["file://".len()..];
-    let store = local_store::LocalStore::openStore(path, params)?;
+    let store = local_store::LocalStore::openStore(path, params).await?;
     Ok(Box::new(store))
 }

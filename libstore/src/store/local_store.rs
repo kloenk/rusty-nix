@@ -1,5 +1,5 @@
 use crate::error::StoreError;
-use log::{trace, warn};
+use log::{debug, trace, warn};
 
 // for async trait
 use futures::future::LocalFutureObj;
@@ -15,7 +15,7 @@ pub struct LocalStore {
 }
 
 impl LocalStore {
-    pub fn openStore(
+    pub async fn openStore(
         path: &str,
         params: std::collections::HashMap<String, String>,
     ) -> Result<Self, crate::error::StoreError> {
@@ -28,11 +28,63 @@ impl LocalStore {
             path
         ))?));
 
-        Ok(Self {
+        let store = Self {
             base_dir: path.to_string(),
             params,
             sqlite,
-        })
+        };
+
+        store.make_store_writable().await?;
+
+        Ok(store)
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn make_store_writable(&self) -> Result<(), StoreError> {
+        debug!("remounting store");
+        if unsafe { libc::getuid() } != 0 {
+            return Ok(());
+        }
+
+        //let stat = std::ptr::null_mut::<libc::statvfs>();
+        //let mut stat: *mut libc::statvfs = libc::zeroed();
+        let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
+        let store_dir = std::ffi::CString::new(self.get_store_dir().as_str()).unwrap();
+        if unsafe { libc::statvfs(store_dir.as_ptr(), stat.as_mut_ptr()) } != 0 {
+            return Err(StoreError::SysError {
+                msg: String::from("getting info about the nix store mount point"),
+            });
+        }
+
+        if (unsafe { stat.assume_init().f_flag } & libc::ST_RDONLY) != 0 {
+            if unsafe { libc::unshare(libc::CLONE_NEWNS) } == -1 {
+                return Err(StoreError::SysError {
+                    msg: String::from("setting up a private mount namespace"),
+                });
+            }
+
+            if unsafe {
+                libc::mount(
+                    &0,
+                    store_dir.as_ptr(),
+                    std::ffi::CString::new("none").unwrap().as_ptr(),
+                    libc::MS_REMOUNT | libc::MS_BIND,
+                    std::ptr::null::<std::ffi::c_void>(),
+                )
+            } == -1
+            {
+                return Err(StoreError::SysError {
+                    msg: String::from("remounting storeDire writable"),
+                }); // TODO: fmt storeDir
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    async fn make_store_writable<'a>(&'a mut self) -> Result<(), StoreError> {
+        Ok(())
     }
 
     pub fn get_state_dir(&self) -> String {
@@ -209,73 +261,22 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    #[cfg(target_os = "linux")]
-    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            if unsafe { libc::getuid() } != 0 {
-                return Ok(());
-            }
-
-            /*let mut stat = libc::statvfs {
-                f_bsize: 0,
-                f_frsize: 0,
-                f_blocks: 0,
-                f_bfree: 0,
-                f_bavail: 0,
-                f_files: 0,
-                f_ffree: 0,
-                f_favail: 0,
-                f_fsid: 0,
-                f_flag: 0,
-                f_namemax: 0,
-                //__f_spare: [0; 6],
-            };*/
-            let mut stat = std::ptr::null_mut::<libc::statvfs>();
-            let storeDir = std::ffi::CString::new(self.get_store_dir().await?.as_str()).unwrap();
-            if unsafe { libc::statvfs(storeDir.as_ptr(), stat) } != 0 {
-                return Err(StoreError::SysError {
-                    msg: String::from("getting info about the nix store mount point"),
-                });
-            }
-
-            if (unsafe { (*stat).f_flag } & libc::ST_RDONLY) != 0 {
-                if unsafe { libc::unshare(libc::CLONE_NEWNS) } == -1 {
-                    return Err(StoreError::SysError {
-                        msg: String::from("setting up a private mount namespace"),
-                    });
-                }
-
-                if unsafe {
-                    libc::mount(
-                        &0,
-                        storeDir.as_ptr(),
-                        std::ffi::CString::new("none").unwrap().as_ptr(),
-                        libc::MS_REMOUNT | libc::MS_BIND,
-                        std::ptr::null::<std::ffi::c_void>(),
-                    )
-                } == -1
-                {
-                    return Err(StoreError::SysError {
-                        msg: String::from("remounting storeDire writable"),
-                    }); // TODO: fmt storeDir
-                }
-            }
-
-            Ok(())
-        }))
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new(async { Ok(()) }))
-    }
-
     fn add_temp_root<'a>(
         &'a mut self,
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             warn!("add_temp_root not yet implemented for LocalStore");
+            Ok(())
+        }))
+    }
+
+    fn delete_path<'a>(
+        &'a mut self,
+        path: &std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            warn!("delete_path not yet implemented");
             Ok(())
         }))
     }
@@ -297,7 +298,7 @@ impl crate::Store for LocalStore {
             self.add_temp_root(&path.path).await?;
 
             if repair || !self.is_valid_path(&path.path).await? {
-                //                self.deletePath(path.path);
+                self.delete_path(&path.path);
 
                 //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
                 // requireFeature("ca-references")
