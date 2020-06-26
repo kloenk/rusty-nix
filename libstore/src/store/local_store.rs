@@ -272,7 +272,7 @@ impl crate::Store for LocalStore {
 
     fn add_temp_root<'a>(
         &'a mut self,
-        path: std::path::PathBuf,
+        path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             warn!("add_temp_root not yet implemented for LocalStore");
@@ -294,9 +294,9 @@ impl crate::Store for LocalStore {
             }
             // TODO: return err if sig is missing
 
-            self.add_temp_root(path.path).await?;
+            self.add_temp_root(&path.path).await?;
 
-            if repair || !self.isValidPath(path.path).await? {
+            if repair || !self.is_valid_path(&path.path).await? {
                 //                self.deletePath(path.path);
 
                 //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???

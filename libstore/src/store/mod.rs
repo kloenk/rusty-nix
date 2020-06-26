@@ -177,7 +177,7 @@ pub trait Store {
 
     fn add_temp_root<'a>(
         &'a mut self,
-        path: std::path::PathBuf,
+        path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
