@@ -15,9 +15,10 @@ custom_error = "1.7"
 clap = "2.33"
 log = "0.4"
 env_logger = "0.6"
-tokio = { version = "0.2.21", features = [ "full", "uds" ] }
+tokio = { version = "*", features = [ "full", "uds" ] }
 futures = "0.3"
 users = "0.10"
+libc = "*"
 
 libstore = { path = "../libstore" }
 libutil = { path = "../libutil" }

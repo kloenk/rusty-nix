@@ -272,7 +272,7 @@ impl<'a> Connection<'a> {
     async fn add_to_store_nar(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
         //let path = std::path::PathBuf::from(&path);
-        let path = super::store::ValidPathInfo::from(path);
+        let mut path = super::store::ValidPathInfo::from(path);
 
         let deriver = self.read_string().await?;
         let deriver = if deriver == "" {
@@ -282,19 +282,43 @@ impl<'a> Connection<'a> {
                 self.store
                     .print_store_path(&std::path::PathBuf::from(deriver))?,
             )
-        };
+        }
+        .map(|v| std::path::PathBuf::from(v));
+        path.deriver = deriver;
 
-        debug!(
-            "add {} to store{}",
-            path,
-            if let Some(v) = deriver {
-                format!(" (deriver: {})", v)
-            } else {
-                "".to_string()
-            }
-        );
+        debug!("add {} to store", path);
 
-        unimplemented!();
+        path.nar_hash = super::store::Hash::sha256(self.read_string().await?);
+        // read references
+        let references = self.read_strings().await?;
+        let references: Vec<std::path::PathBuf> = references
+            .into_iter()
+            .map(move |v| std::path::PathBuf::from(v))
+            .collect();
+        path.references = references;
+        path.registration_time =
+            chrono::NaiveDateTime::from_timestamp(self.read_int().await? as i64, 0);
+        path.narSize = Some(self.read_int().await?);
+        path.ultimate = self.read_int().await? != 0;
+        path.sigs = self.read_strings().await?;
+        path.ca = Some(self.read_string().await?); // TODO: better type
+
+        let repair = self.read_int().await? != 0;
+        let mut dont_check_sigs = self.read_int().await? != 0;
+        if !self.trusted && dont_check_sigs {
+            dont_check_sigs = false;
+        }
+        if !self.trusted {
+            path.ultimate = false;
+        }
+
+        self.logger.start_work().await?;
+
+        self.store
+            .add_to_store(path, /*source,*/ repair, !dont_check_sigs)
+            .await?;
+        self.logger.stop_work(logger::WorkDone).await?;
+
         Ok(())
     }
 
@@ -367,6 +391,17 @@ impl<'a> Connection<'a> {
         self.write_padding(len).await?;
 
         Ok(())
+    }
+
+    async fn read_strings(&self) -> Result<Vec<String>, StoreError> {
+        let len = self.read_int().await?;
+
+        let mut vec = Vec::new();
+        for v in 0..len {
+            vec.push(self.read_string().await?);
+        }
+
+        Ok(vec)
     }
 
     async fn write_strings(&self, v: &Vec<String>) -> EmptyResult {

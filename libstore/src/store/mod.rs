@@ -92,17 +92,10 @@ impl ValidPathInfo {
 
 impl std::convert::From<String> for ValidPathInfo {
     fn from(v: String) -> Self {
-        //let nar_hash: Vec<char> = v.chars().collect();
-        //let nar_hash: &[char] = &nar_hash[v.find("/")..v.find("-")];
-        let nar_hash = v
-            .get(v.find("/").unwrap_or(0)..v.find("-").unwrap_or(0))
-            .unwrap_or("");
-        //let nar_hash = Hash::from(&nar_hash);
-        let nar_hash = Hash::sha256(nar_hash.to_string());
         Self {
             path: std::path::PathBuf::from(&v),
             deriver: None,
-            nar_hash,
+            nar_hash: Hash::None,
             references: Vec::new(),
             registration_time: chrono::NaiveDateTime::from_timestamp(0, 0), // TODO: ??
             narSize: None,
@@ -133,6 +126,7 @@ impl Eq for ValidPathInfo {}
 #[derive(Debug, Eq, PartialEq)]
 pub enum Hash {
     sha256(String), // TOOD: use sha256 type
+    None,
 }
 
 impl std::convert::From<&str> for Hash {
@@ -149,6 +143,7 @@ impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Hash::sha256(v) => write!(f, "{}", v), // no sha256:<hash>??
+            Hash::None => write!(f, "EMTPY-HASH"),
         }
     }
 }
@@ -169,6 +164,21 @@ pub trait Store {
         &'a mut self,
         path: &'a std::path::Path,
     ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
+
+    fn add_to_store<'a>(
+        &'a mut self,
+        //source,
+        path: ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn add_temp_root<'a>(
+        &'a mut self,
+        path: std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 

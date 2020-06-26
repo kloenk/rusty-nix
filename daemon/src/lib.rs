@@ -192,7 +192,8 @@ impl NixDaemon {
         info!(
             "accepted connection from user {}{}",
             user,
-            if trusted { " (trusted)" } else { "" }
+            if trusted { " (trusted)" } else { "" },
+            //if let Some(pid) = creds.pid { format!(" pid: {}", pid) } else { "".to_string() }
         ); // TODO: pid
 
         // verify client version

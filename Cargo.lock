@@ -497,6 +497,7 @@ dependencies = [
  "custom_error",
  "env_logger",
  "futures",
+ "libc",
  "libstore",
  "libutil",
  "log",

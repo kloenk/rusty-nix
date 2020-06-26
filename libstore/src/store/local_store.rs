@@ -1,5 +1,5 @@
 use crate::error::StoreError;
-use log::trace;
+use log::{trace, warn};
 
 // for async trait
 use futures::future::LocalFutureObj;
@@ -75,6 +75,7 @@ impl crate::Store for LocalStore {
                 use std::os::unix::fs::PermissionsExt;
                 let perms = std::fs::Permissions::from_mode(0o755);
                 std::fs::set_permissions(&dir, perms)?;
+                // TODO: chown
                 let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
                 let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
                 if chown != 0 {
@@ -106,7 +107,6 @@ impl crate::Store for LocalStore {
                     path: path.to_string_lossy().to_string(),
                 });
             }
-
             let mut sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
@@ -206,6 +206,140 @@ impl crate::Store for LocalStore {
             trace!("{:?}", data);
 
             Ok(data) // TODO: no unwrap
+        }))
+    }
+
+    #[cfg(target_os = "linux")]
+    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if unsafe { libc::getuid() } != 0 {
+                return Ok(());
+            }
+
+            /*let mut stat = libc::statvfs {
+                f_bsize: 0,
+                f_frsize: 0,
+                f_blocks: 0,
+                f_bfree: 0,
+                f_bavail: 0,
+                f_files: 0,
+                f_ffree: 0,
+                f_favail: 0,
+                f_fsid: 0,
+                f_flag: 0,
+                f_namemax: 0,
+                //__f_spare: [0; 6],
+            };*/
+            let mut stat = std::ptr::null_mut::<libc::statvfs>();
+            let storeDir = std::ffi::CString::new(self.get_store_dir().await?.as_str()).unwrap();
+            if unsafe { libc::statvfs(storeDir.as_ptr(), stat) } != 0 {
+                return Err(StoreError::SysError {
+                    msg: String::from("getting info about the nix store mount point"),
+                });
+            }
+
+            if (unsafe { (*stat).f_flag } & libc::ST_RDONLY) != 0 {
+                if unsafe { libc::unshare(libc::CLONE_NEWNS) } == -1 {
+                    return Err(StoreError::SysError {
+                        msg: String::from("setting up a private mount namespace"),
+                    });
+                }
+
+                if unsafe {
+                    libc::mount(
+                        &0,
+                        storeDir.as_ptr(),
+                        std::ffi::CString::new("none").unwrap().as_ptr(),
+                        libc::MS_REMOUNT | libc::MS_BIND,
+                        std::ptr::null::<std::ffi::c_void>(),
+                    )
+                } == -1
+                {
+                    return Err(StoreError::SysError {
+                        msg: String::from("remounting storeDire writable"),
+                    }); // TODO: fmt storeDir
+                }
+            }
+
+            Ok(())
+        }))
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn make_store_writable<'a>(&'a mut self) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async { Ok(()) }))
+    }
+
+    fn add_temp_root<'a>(
+        &'a mut self,
+        path: std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            warn!("add_temp_root not yet implemented for LocalStore");
+            Ok(())
+        }))
+    }
+
+    fn add_to_store<'a>(
+        &'a mut self,
+        path: super::ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if let super::Hash::None = path.nar_hash {
+                return Err(StoreError::MissingHash {
+                    path: path.path.display().to_string(),
+                });
+            }
+            // TODO: return err if sig is missing
+
+            self.add_temp_root(path.path).await?;
+
+            if repair || !self.isValidPath(path.path).await? {
+                //                self.deletePath(path.path);
+
+                //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
+                // requireFeature("ca-references")
+
+                //                self.registerValidPath(path).await?;
+
+                /* std::unique_ptr<AbstractHashSink> hashSink;
+                if (info.ca == "" || !info.references.count(info.path))
+                    hashSink = std::make_unique<HashSink>(htSHA256);
+                else
+                    hashSink = std::make_unique<HashModuloSink>(htSHA256, std::string(info.path.hashPart()));
+
+                LambdaSource wrapperSource([&](unsigned char * data, size_t len) -> size_t {
+                    size_t n = source.read(data, len);
+                    (*hashSink)(data, n);
+                    return n;
+                });
+
+                restorePath(realPath, wrapperSource);
+
+                auto hashResult = hashSink->finish();
+
+                if (hashResult.first != info.narHash)
+                    throw Error("hash mismatch importing path '%s';\n  wanted: %s\n  got:    %s",
+                        printStorePath(info.path), info.narHash.to_string(Base32, true), hashResult.first.to_string(Base32, true));
+
+                if (hashResult.second != info.narSize)
+                    throw Error("size mismatch importing path '%s';\n  wanted: %s\n  got:   %s",
+                        printStorePath(info.path), info.narSize, hashResult.second);
+
+                autoGC();
+
+                canonicalisePathMetaData(realPath, -1);
+
+                optimisePath(realPath); // FIXME: combine with hashPath()
+
+                registerValidPath(info); */
+            }
+
+            // outputLock.setDeletion
+
+            unimplemented!()
         }))
     }
 }
