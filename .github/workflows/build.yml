@@ -23,6 +23,9 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Install sqlite
+        run: apt install libsqlite3-dev
+
       - uses: actions-rs/cargo@v1
         with:
           command: build
