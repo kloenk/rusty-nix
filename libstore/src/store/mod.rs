@@ -58,13 +58,33 @@ pub struct ValidPathInfo {
 }
 
 impl ValidPathInfo {
-    /*/* Return a fingerprint of the store path to be used in binary
-    cache signatures. It contains the store path, the base-32
-    SHA-256 hash of the NAR serialisation of the path, the size of
-    the NAR, and the sorted references. The size field is strictly
-    speaking superfluous, but might prevent endless/excessive data
-    attacks. */
-    std::string fingerprint(const Store & store) const;
+    /// Return a fingerprint of the store path to be used in binary
+    /// cache signatures. It contains the store path, the base-32
+    /// SHA-256 hash of the NAR serialisation of the path, the size of
+    /// the NAR, and the sorted references. The size field is strictly
+    /// speaking superfluous, but might prevent endless/excessive data
+    /// attacks.
+    // std::string fingerprint(const Store & store) const;
+    pub fn fingerprint(&self) -> Result<String, StoreError> {
+        if (self.narSize == None || self.narSize.unwrap() == 0) || self.nar_hash == Hash::None {
+            return Err(StoreError::NoFingerprint {
+                path: self.path.display().to_string(),
+            });
+        }
+
+        Ok(format!(
+            "1;{};{};{};{}",
+            print_store_path(&self.path),
+            "to_string(Base32, self.nar_hash)",
+            self.narSize.unwrap(),
+            self.references
+                .iter()
+                .map(|v| print_store_path(&v))
+                .collect::<Vec<String>>()
+                .join(",")
+        ))
+    }
+    /*
 
     void sign(const Store & store, const SecretKey & secretKey);
 
@@ -72,15 +92,40 @@ impl ValidPathInfo {
     bool isContentAddressed(const Store & store) const;
 
     static const size_t maxSigs = std::numeric_limits<size_t>::max();
+    */
+    /// Return the number of signatures on this .narinfo that were
+    /// produced by one of the specified keys, or maxSigs if the path
+    /// is content-addressed.
+    //size_t checkSignatures(const Store & store, const PublicKeys & publicKeys) const;
+    pub fn check_signatures(&self) -> Result<usize, StoreError> {
+        // TODO: ca foo
 
-    /* Return the number of signatures on this .narinfo that were
-       produced by one of the specified keys, or maxSigs if the path
-       is content-addressed. */
-    size_t checkSignatures(const Store & store, const PublicKeys & publicKeys) const;
+        use crate::crypto::PublicKeys;
+        use std::convert::TryFrom;
+        let config = crate::CONFIG.read().unwrap();
+        let public_keys = PublicKeys::try_from(config.trusted_public_keys.clone())?;
+        drop(config);
 
-    /* Verify a single signature. */
-    bool checkSignature(const Store & store, const PublicKeys & publicKeys, const std::string & sig) const;
+        let mut good = 0;
+        for v in &self.sigs {
+            if self.check_signature(&v, &public_keys)? {
+                good += 1;
+            }
+        } 
 
+        Ok(good)
+    }
+
+    
+    ///Verify a single signature.
+    //bool checkSignature(const Store & store, const PublicKeys & publicKeys, const std::string & sig) const;
+    pub fn check_signature(&self, sig: &str, public_keys: &crate::crypto::PublicKeys) -> Result<bool, StoreError> {
+        let fingerprint = self.fingerprint()?;
+
+        public_keys.verify(self.fingerprint()?.as_bytes(), sig)
+    }
+
+    /*
     Strings shortRefs() const;
 
     ValidPathInfo(const StorePath & path) : path(path) { }
@@ -197,14 +242,14 @@ pub trait Store {
 
 pub async fn openStore(
     store_uri: &str,
-    params: std::collections::HashMap<String, String>,
+    params: std::collections::HashMap<String, Param>,
 ) -> Result<Box<dyn Store>, StoreError> {
     if store_uri == "auto" {
         let store = local_store::LocalStore::openStore("/nix/", params).await?;
         return Ok(Box::new(store));
     }
 
-    // FIXME: magic for other store bachends
+    // TODO: magic for other store bachends
     if !store_uri.starts_with("file://") {
         return Err(crate::error::StoreError::InvalidStoreUri {
             uri: store_uri.to_string(),
@@ -214,4 +259,45 @@ pub async fn openStore(
     let path = &store_uri["file://".len()..];
     let store = local_store::LocalStore::openStore(path, params).await?;
     Ok(Box::new(store))
+}
+
+pub fn print_store_path(v: &std::path::Path) -> String {
+    // TODO: storeDir +
+    v.display().to_string()
+}
+
+#[derive(Debug)]
+pub enum Param {
+    String(String),
+    Bool(bool),
+    UInt(usize),
+    Vec(Vec<Param>),
+}
+
+impl std::convert::From<String> for Param {
+    fn from(v: String) -> Self {
+        Param::String(v)
+    }
+}
+
+impl std::convert::From<bool> for Param {
+    fn from(v: bool) -> Self {
+        Param::Bool(v)
+    }
+}
+
+impl std::convert::From<usize> for Param {
+    fn from(v: usize) -> Self {
+        Param::UInt(v)
+    }
+}
+
+impl<T: std::convert::Into<Param>> std::convert::From<Vec<T>> for Param {
+    fn from(v: Vec<T>) -> Self {
+        let mut vec = Vec::new();
+        for v in v {
+            vec.push(v.into());
+        }
+        Param::Vec(vec)
+    }
 }

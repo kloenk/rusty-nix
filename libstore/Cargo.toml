@@ -18,6 +18,8 @@ lru_time_cache = "*"
 rusqlite = "*"
 sha2 = "*"
 libc = "*"
-ring = "*"
+ring = { version = "*", features = [ "std", "dev_urandom_fallback" ] }
+base64 = "*"
+lazy_static = "*"
 
 libutil = { path = "../libutil" }

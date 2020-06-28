@@ -16,6 +16,9 @@ custom_error! {
         OsError{ call: String, ret: i32 } = "Os Error: {call}: {ret}",
         SysError{ msg: String } = "SysError: {msg}",
         InvalidKey{ key: String } = "The key {key} is invalid",
+        RingError{ source: ring::error::Unspecified } = "error in crypto: {source}",
+        BaseDecodeError{ source: base64::DecodeError } = "DecodeError {source}",
+        NoFingerprint{ path: String } = "cannot calculate fingerprint of path {path} because its size/hash is not known",
 }
 
 custom_error! {

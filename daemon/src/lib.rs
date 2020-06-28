@@ -18,7 +18,6 @@ pub mod error;
 
 pub struct NixDaemon {
     pub stdio: bool,
-    pub nix_config: Arc<NixConfig>,
 }
 
 impl NixDaemon {
@@ -59,12 +58,14 @@ impl NixDaemon {
 
         let config_file = std::path::Path::new(matches.value_of("config").unwrap());
         let nix_config = libutil::config::NixConfig::parse_file(config_file)?;
+        let mut store_config = libstore::CONFIG.write().unwrap();
+        *store_config = nix_config;
         // TODO: merge with args
 
-        let mut config = Self::new_from_config(Arc::new(nix_config));
+        let mut config = Self { stdio: false };
 
         if matches.is_present("daemon") {
-            trace!("provided `--daemon` which is only here for backward compability");
+            info!("provided `--daemon` which is only here for backward compability");
         }
 
         if matches.is_present("stdio") {
@@ -129,10 +130,12 @@ impl NixDaemon {
                 unsafe { std::os::unix::io::FromRawFd::from_raw_fd(fd) };
             listener = UnixListener::from_std(raw_fd).ok();
         } else {
-            let file = &self.nix_config.nix_daemon_socket_file;
+            let config = libstore::CONFIG.read().unwrap();
+            let file = config.nix_daemon_socket_file.to_string();
+            drop(config);
             info!("listening on {}", file);
             // TODO: create dirs
-            listener = Some(UnixListener::bind(file)?);
+            listener = Some(UnixListener::bind(&file)?);
 
             // set permissions
             use std::os::unix::fs::PermissionsExt;
@@ -162,12 +165,6 @@ impl NixDaemon {
         Ok(())
     }
 
-    fn new_from_config(config: Arc<NixConfig>) -> Self {
-        Self {
-            stdio: false,
-            nix_config: config,
-        }
-    }
     async fn handle_connection(&self, stream: UnixStream) -> CommandResult<()> {
         let mut stream = stream;
 
@@ -183,11 +180,14 @@ impl NixDaemon {
             None => "not allowed group".to_string(),
         };
 
-        let trusted = self.nix_config.is_trusted_user(&user, &group);
+        let config = libstore::CONFIG.read().unwrap();
+        let trusted = config.is_trusted_user(&user, &group);
 
-        if !self.nix_config.is_allowed_user(&user, &group) {
+        if !config.is_allowed_user(&user, &group) {
             return Err(crate::error::CommandError::DisallowedUser { user: user });
         }
+        let store = config.store.to_string();
+        drop(config);
 
         info!(
             "accepted connection from user {}{}",
@@ -224,9 +224,10 @@ impl NixDaemon {
 
         trace!("version an client matching");
 
-        let store = libstore::openStore(&self.nix_config.store, std::collections::HashMap::new())
-            .await
-            .unwrap();
+        let params = std::collections::HashMap::new();
+        // TODO: override settings via Params
+
+        let store = libstore::openStore(&store, params).await.unwrap();
 
         // TODO: start tunnelloger
         let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);

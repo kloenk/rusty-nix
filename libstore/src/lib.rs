@@ -7,3 +7,9 @@ pub mod crypto;
 
 pub use store::openStore;
 pub use store::Store;
+
+use lazy_static::lazy_static;
+lazy_static! {
+    pub static ref CONFIG: std::sync::RwLock<libutil::config::NixConfig> =
+        std::sync::RwLock::new(libutil::config::NixConfig::default());
+}

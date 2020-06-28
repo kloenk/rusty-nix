@@ -9,7 +9,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct LocalStore {
     base_dir: String,
-    params: std::collections::HashMap<String, String>,
+    params: std::collections::HashMap<String, super::Param>,
 
     sqlite: Arc<RwLock<rusqlite::Connection>>,
 }
@@ -17,10 +17,11 @@ pub struct LocalStore {
 impl LocalStore {
     pub async fn openStore(
         path: &str,
-        params: std::collections::HashMap<String, String>,
+        params: std::collections::HashMap<String, super::Param>,
     ) -> Result<Self, crate::error::StoreError> {
         // TODO: access checks?
         trace!("opening local store {}", path);
+        trace!("got params: {:?}", params);
         std::fs::create_dir_all(path)?;
 
         let sqlite = Arc::new(RwLock::new(rusqlite::Connection::open(&format!(
@@ -50,7 +51,10 @@ impl LocalStore {
         let store_dir = std::ffi::CString::new(self.get_store_dir().as_str()).unwrap();
         if unsafe { libc::statvfs(store_dir.as_ptr(), stat.as_mut_ptr()) } != 0 {
             return Err(StoreError::SysError {
-                msg: format!("getting info about the nix store mount point: {}", self.get_store_dir()),
+                msg: format!(
+                    "getting info about the nix store mount point: {}",
+                    self.get_store_dir()
+                ),
             });
         }
 
@@ -297,7 +301,6 @@ impl crate::Store for LocalStore {
 
             if repair || !self.is_valid_path(&path.path).await? {
                 self.delete_path(&path.path);
-                
 
                 /*if path.ca.is_some() {
                     let ca = path.ca.unwrap();
