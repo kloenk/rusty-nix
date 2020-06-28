@@ -288,7 +288,8 @@ impl<'a> Connection<'a> {
 
         debug!("add {} to store", path);
 
-        path.nar_hash = super::store::Hash::sha256(self.read_string().await?);
+        //path.nar_hash = super::store::Hash::sha256(self.read_string().await?);
+        path.nar_hash = super::store::Hash::from_sha256(&self.read_string().await?)?;
         // read references
         let references = self.read_strings().await?;
         let references: Vec<std::path::PathBuf> = references

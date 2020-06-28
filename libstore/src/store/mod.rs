@@ -2,6 +2,8 @@ use crate::error::StoreError;
 
 use std::sync::{Arc, RwLock};
 
+use log::{debug, info, trace, warn};
+
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
@@ -72,6 +74,12 @@ impl ValidPathInfo {
             });
         }
 
+        // nar hash to Base32
+        let mut nar_hash = String::new();
+        if let Hash::sha256(v) = &self.nar_hash {
+            nar_hash = data_encoding::BASE32.encode(v)
+        } // TODO: make pretty
+
         Ok(format!(
             "1;{};{};{};{}",
             print_store_path(&self.path),
@@ -111,28 +119,25 @@ impl ValidPathInfo {
             if self.check_signature(&v, &public_keys)? {
                 good += 1;
             }
-        } 
+        }
 
         Ok(good)
     }
 
-    
     ///Verify a single signature.
     //bool checkSignature(const Store & store, const PublicKeys & publicKeys, const std::string & sig) const;
-    pub fn check_signature(&self, sig: &str, public_keys: &crate::crypto::PublicKeys) -> Result<bool, StoreError> {
+    pub fn check_signature(
+        &self,
+        sig: &str,
+        public_keys: &crate::crypto::PublicKeys,
+    ) -> Result<bool, StoreError> {
         let fingerprint = self.fingerprint()?;
 
         public_keys.verify(self.fingerprint()?.as_bytes(), sig)
     }
 
     /*
-    Strings shortRefs() const;
-
-    ValidPathInfo(const StorePath & path) : path(path) { }
-
-    ValidPathInfo(StorePath && path) : path(std::move(path)) { }
-
-    virtual ~ValidPathInfo() { }*/
+    Strings shortRefs() const;*/
 }
 
 impl std::convert::From<String> for ValidPathInfo {
@@ -170,15 +175,42 @@ impl Eq for ValidPathInfo {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Hash {
-    sha256(String), // TOOD: use sha256 type
+    sha256([u8; 32]),
     None,
+}
+
+impl Hash {
+    pub fn from_sha256(v: &str) -> Result<Self, StoreError> {
+        let mut buf: [u8; 32] = [0; 32];
+        data_encoding::HEXLOWER
+            .decode_mut(v.as_bytes(), &mut buf)
+            .map_err(|_| StoreError::HashDecodePartialError {
+                error: v.to_string(),
+            })?; // TODO: error handling
+                 //base64::decode_config_slice(v, base64::STANDARD, &mut buf)?;
+        Ok(Hash::sha256(buf))
+    }
 }
 
 impl std::convert::From<&str> for Hash {
     fn from(v: &str) -> Self {
         let v: Vec<&str> = v.split(':').collect();
         match *v.get(0).unwrap_or(&"") {
-            "sha256" => Hash::sha256(v.get(1).unwrap().to_string()),
+            "sha256" => {
+                //let mut buf: [u8; 32] = [0; 32];
+                //trace!("decoding sha hash: {}", v.get(1).unwrap());
+                //base64::decode_config_slice(v.get(1).unwrap(), base64::STANDARD, &mut buf).unwrap(); // TODO: error handling
+                //Hash::sha256(v.get(1).unwrap().to_string())
+                let mut buf: [u8; 32] = [0; 32];
+                trace!("decoding sha hash: {}", v.get(1).unwrap());
+                data_encoding::HEXLOWER
+                    .decode_mut(v.get(1).unwrap().as_bytes(), &mut buf)
+                    .map_err(|_| StoreError::HashDecodePartialError {
+                        error: v.get(1).unwrap().to_string(),
+                    })
+                    .unwrap(); // TODO: error handling
+                Hash::sha256(buf)
+            }
             _ => panic!("invalid hash"),
         }
     }
@@ -187,7 +219,7 @@ impl std::convert::From<&str> for Hash {
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Hash::sha256(v) => write!(f, "{}", v), // no sha256:<hash>??
+            Hash::sha256(v) => write!(f, "{}", data_encoding::HEXLOWER.encode(v)), // no sha256:<hash>??
             Hash::None => write!(f, "EMTPY-HASH"),
         }
     }

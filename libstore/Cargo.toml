@@ -19,7 +19,7 @@ rusqlite = "*"
 sha2 = "*"
 libc = "*"
 ring = { version = "*", features = [ "std", "dev_urandom_fallback" ] }
-base64 = "*"
 lazy_static = "*"
+data-encoding = "*"
 
 libutil = { path = "../libutil" }

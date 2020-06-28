@@ -60,7 +60,7 @@ impl PublicKeys {
         let name: &str = ss[0];
         let sig: &str = ss[1];
 
-        let sig = base64::decode(sig)?;
+        let sig = data_encoding::BASE64.decode(sig.as_bytes())?; // base64?
 
         let key = self.as_ref().get(name);
 

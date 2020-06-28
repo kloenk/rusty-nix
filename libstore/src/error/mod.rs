@@ -17,8 +17,10 @@ custom_error! {
         SysError{ msg: String } = "SysError: {msg}",
         InvalidKey{ key: String } = "The key {key} is invalid",
         RingError{ source: ring::error::Unspecified } = "error in crypto: {source}",
-        BaseDecodeError{ source: base64::DecodeError } = "DecodeError {source}",
         NoFingerprint{ path: String } = "cannot calculate fingerprint of path {path} because its size/hash is not known",
+        HashDecodeError { source: data_encoding::DecodeError } = "cannot decode: {source}",
+        //HashDecodePartialError { source: data_encoding::DecodePartial } = "cannot decode {source}", // TODO: to_string missing on DecodePartial
+        HashDecodePartialError { error: String } = "cannont decode {error}",
 }
 
 custom_error! {
