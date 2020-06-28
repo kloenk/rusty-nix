@@ -15,6 +15,7 @@ custom_error! {
         MissingHash{path: String} = "{} lacks valid signature",
         OsError{ call: String, ret: i32 } = "Os Error: {call}: {ret}",
         SysError{ msg: String } = "SysError: {msg}",
+        InvalidKey{ key: String } = "The key {key} is invalid",
 }
 
 custom_error! {

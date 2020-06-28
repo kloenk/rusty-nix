@@ -46,13 +46,11 @@ impl LocalStore {
             return Ok(());
         }
 
-        //let stat = std::ptr::null_mut::<libc::statvfs>();
-        //let mut stat: *mut libc::statvfs = libc::zeroed();
         let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
         let store_dir = std::ffi::CString::new(self.get_store_dir().as_str()).unwrap();
         if unsafe { libc::statvfs(store_dir.as_ptr(), stat.as_mut_ptr()) } != 0 {
             return Err(StoreError::SysError {
-                msg: String::from("getting info about the nix store mount point"),
+                msg: format!("getting info about the nix store mount point: {}", self.get_store_dir()),
             });
         }
 
@@ -74,8 +72,8 @@ impl LocalStore {
             } == -1
             {
                 return Err(StoreError::SysError {
-                    msg: String::from("remounting storeDire writable"),
-                }); // TODO: fmt storeDir
+                    msg: format!("remounting store writable: {}", self.get_store_dir()),
+                });
             }
         }
 
@@ -299,6 +297,12 @@ impl crate::Store for LocalStore {
 
             if repair || !self.is_valid_path(&path.path).await? {
                 self.delete_path(&path.path);
+                
+
+                /*if path.ca.is_some() {
+                    let ca = path.ca.unwrap();
+                    if !ca.starts_with("text:") && path.references.len() == 0 || path.references.len() == 0
+                }*/
 
                 //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
                 // requireFeature("ca-references")
