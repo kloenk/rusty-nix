@@ -15,7 +15,7 @@ pub struct LocalStore {
 }
 
 impl LocalStore {
-    pub async fn openStore(
+    pub async fn open_store(
         path: &str,
         params: std::collections::HashMap<String, super::Param>,
     ) -> Result<Self, crate::error::StoreError> {
@@ -161,10 +161,10 @@ impl crate::Store for LocalStore {
                     path: path.to_string_lossy().to_string(),
                 });
             }
-            let mut sqlite = self.sqlite.write().unwrap();
+            let sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
-            let mut data = stm
+            let data = stm
                 .query_row(&[&path.to_str()], |row| Ok(true))
                 .unwrap_or(false);
 
@@ -189,11 +189,11 @@ impl crate::Store for LocalStore {
                 });
             }
 
-            let hashPart = get_hash_part(&path);
+            let hash_part = get_hash_part(&path);
             // TODO: implement lru cache
 
             // TODO: check for disk cache
-            let mut sqlite = self.sqlite.write().unwrap();
+            let sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id, hash, registrationTime, deriver, narSize, ultimate, sigs, ca FROM ValidPaths WHERE path = (?);")?;
 
             trace!("queriying for {} in sqlite", path.display());
@@ -210,7 +210,7 @@ impl crate::Store for LocalStore {
                     .get::<usize, String>(3)
                     .map(|v| std::path::PathBuf::from(v))
                     .ok();
-                let narSize: Option<u64> = row.get::<usize, isize>(4).map(|v| v as u64).ok();
+                let nar_size: Option<u64> = row.get::<usize, isize>(4).map(|v| v as u64).ok();
                 let ultimate: bool = row.get::<usize, isize>(5).unwrap_or(0) != 0;
                 let sigs: Vec<String> = row
                     .get::<usize, String>(6)
@@ -223,7 +223,7 @@ impl crate::Store for LocalStore {
                     nar_hash,
                     references: Vec::new(), // TODO: referecnes foo
                     registration_time,
-                    narSize,
+                    nar_size: nar_size,
                     id,
                     ultimate,
                     sigs,

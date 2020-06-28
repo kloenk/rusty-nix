@@ -1,7 +1,6 @@
 use std::convert::TryInto;
-use std::sync::Arc;
 
-use tokio::io::{self, AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::stream::StreamExt;
 
@@ -12,7 +11,6 @@ extern crate log;
 use clap::{App, Arg};
 
 use error::CommandResult;
-use libutil::config::NixConfig;
 
 pub mod error;
 
@@ -122,10 +120,11 @@ impl NixDaemon {
 
         // TODO: get rid of zombies
 
+        #[allow(unused_assignments)]
         let mut listener: Option<UnixListener> = None;
 
-        if let Ok(listenFds) = std::env::var("LISTEN_FDS") {
-            let fd: i32 = listenFds.parse().unwrap();
+        if let Ok(listen_fds) = std::env::var("LISTEN_FDS") {
+            let fd: i32 = listen_fds.parse().unwrap();
             let raw_fd: std::os::unix::net::UnixListener =
                 unsafe { std::os::unix::io::FromRawFd::from_raw_fd(fd) };
             listener = UnixListener::from_std(raw_fd).ok();
@@ -145,7 +144,7 @@ impl NixDaemon {
             // TODO: exit trap to remove socket
         }
 
-        let mut listener = listener.expect("ther is no listener");
+        let mut listener = listener.expect("there is no listener");
 
         while let Some(stream) = listener.next().await {
             match stream {
@@ -227,7 +226,7 @@ impl NixDaemon {
         let params = std::collections::HashMap::new();
         // TODO: override settings via Params
 
-        let store = libstore::openStore(&store, params).await.unwrap();
+        let store = libstore::open_store(&store, params).await.unwrap();
 
         // TODO: start tunnelloger
         let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);

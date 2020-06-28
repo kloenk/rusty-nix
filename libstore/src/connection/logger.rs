@@ -20,7 +20,7 @@ pub enum WorkFinish {
     Error(String, usize),
 }
 
-pub const WorkDone: WorkFinish = WorkFinish::Done;
+pub const WORKDONE: WorkFinish = WorkFinish::Done;
 
 pub struct TunnelLogger<'a> {
     pub can_send_stderr: bool,

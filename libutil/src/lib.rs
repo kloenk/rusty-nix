@@ -21,6 +21,7 @@ pub async fn canon_path<'a>(path: &'a str) -> Result<&'a Path> {
     Ok(Path::new(path))
 }
 
+#[allow(unused_mut)] // TODO: remove when implemented
 pub async fn canon_path_resolve_symlink(path: &str) -> Result<&Path> {
     let mut follow_count: usize = 0;
     const MAX_FOLLOW: usize = 1024;

@@ -97,7 +97,7 @@ impl<'a> Connection<'a> {
         self.store
             .create_user(self.u_name.clone(), self.uid)
             .await?;
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
 
         loop {
             // daemon loop
@@ -159,7 +159,7 @@ impl<'a> Connection<'a> {
         self.logger.start_work().await?;
         println!("settings: {:?}", settings);
         // FIXME: apply settings (when not recursive)
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
 
         Ok(())
     }
@@ -170,7 +170,7 @@ impl<'a> Connection<'a> {
         debug!("queriying path info for {}", path.display());
         self.logger.start_work().await?;
         let info = self.store.query_path_info(path).await;
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
 
         match info {
             Err(e) => {
@@ -194,7 +194,7 @@ impl<'a> Connection<'a> {
                 }
                 self.write_u64(v.registration_time.timestamp() as u64)
                     .await?;
-                if let Some(v) = v.narSize {
+                if let Some(v) = v.nar_size {
                     self.write_u64(v).await?;
                 } else {
                     self.write_u64(0).await?;
@@ -221,7 +221,7 @@ impl<'a> Connection<'a> {
 
         self.logger.start_work().await?;
         let valid = self.store.is_valid_path(&path).await?;
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
         self.write_bool(valid).await?;
 
         Ok(())
@@ -236,7 +236,7 @@ impl<'a> Connection<'a> {
         self.logger.start_work().await?;
         warn!("implement add temp root"); // TODO: add temp root
                                           //self.store.add_temp_root(&path).await?;
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
         self.write_u64(1).await?;
 
         Ok(())
@@ -251,7 +251,7 @@ impl<'a> Connection<'a> {
         self.logger.start_work().await?;
         // TODO: store.add_indirect_root(&path).await?;
         warn!("implement indirect root");
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
         self.write_u64(1).await?;
 
         Ok(())
@@ -263,7 +263,7 @@ impl<'a> Connection<'a> {
         self.logger.start_work().await?;
         // TODO: store.add_indirect_root(&path).await?;
         warn!("implement gc sync");
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
         self.write_u64(1).await?;
 
         Ok(())
@@ -299,7 +299,7 @@ impl<'a> Connection<'a> {
         path.references = references;
         path.registration_time =
             chrono::NaiveDateTime::from_timestamp(self.read_int().await? as i64, 0);
-        path.narSize = Some(self.read_int().await?);
+        path.nar_size = Some(self.read_int().await?);
         path.ultimate = self.read_int().await? != 0;
         path.sigs = self.read_strings().await?;
         path.ca = Some(self.read_string().await?); // TODO: better type
@@ -318,7 +318,7 @@ impl<'a> Connection<'a> {
         self.store
             .add_to_store(path, /*source,*/ repair, !dont_check_sigs)
             .await?;
-        self.logger.stop_work(logger::WorkDone).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
 
         Ok(())
     }

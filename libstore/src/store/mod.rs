@@ -20,7 +20,7 @@ pub struct ValidPathInfo {
     pub nar_hash: Hash,                      // TODO: type narHash
     pub references: Vec<std::path::PathBuf>, // TODO: type StorePathSets
     pub registration_time: NaiveDateTime,
-    pub narSize: Option<u64>,
+    pub nar_size: Option<u64>,
     pub id: u64, // internal use only
 
     /* Whether the path is ultimately trusted, that is, it's a
@@ -68,7 +68,7 @@ impl ValidPathInfo {
     /// attacks.
     // std::string fingerprint(const Store & store) const;
     pub fn fingerprint(&self) -> Result<String, StoreError> {
-        if (self.narSize == None || self.narSize.unwrap() == 0) || self.nar_hash == Hash::None {
+        if (self.nar_size == None || self.nar_size.unwrap() == 0) || self.nar_hash == Hash::None {
             return Err(StoreError::NoFingerprint {
                 path: self.path.display().to_string(),
             });
@@ -76,15 +76,15 @@ impl ValidPathInfo {
 
         // nar hash to Base32
         let mut nar_hash = String::new();
-        if let Hash::sha256(v) = &self.nar_hash {
+        if let Hash::SHA256(v) = &self.nar_hash {
             nar_hash = data_encoding::BASE32.encode(v)
         } // TODO: make pretty
 
         Ok(format!(
             "1;{};{};{};{}",
             print_store_path(&self.path),
-            "to_string(Base32, self.nar_hash)",
-            self.narSize.unwrap(),
+            nar_hash,
+            self.nar_size.unwrap(),
             self.references
                 .iter()
                 .map(|v| print_store_path(&v))
@@ -148,7 +148,7 @@ impl std::convert::From<String> for ValidPathInfo {
             nar_hash: Hash::None,
             references: Vec::new(),
             registration_time: chrono::NaiveDateTime::from_timestamp(0, 0), // TODO: ??
-            narSize: None,
+            nar_size: None,
             id: 0,
             ultimate: false,
             sigs: Vec::new(),
@@ -175,7 +175,7 @@ impl Eq for ValidPathInfo {}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum Hash {
-    sha256([u8; 32]),
+    SHA256([u8; 32]),
     None,
 }
 
@@ -188,7 +188,7 @@ impl Hash {
                 error: v.to_string(),
             })?; // TODO: error handling
                  //base64::decode_config_slice(v, base64::STANDARD, &mut buf)?;
-        Ok(Hash::sha256(buf))
+        Ok(Hash::SHA256(buf))
     }
 }
 
@@ -209,7 +209,7 @@ impl std::convert::From<&str> for Hash {
                         error: v.get(1).unwrap().to_string(),
                     })
                     .unwrap(); // TODO: error handling
-                Hash::sha256(buf)
+                Hash::SHA256(buf)
             }
             _ => panic!("invalid hash"),
         }
@@ -219,7 +219,7 @@ impl std::convert::From<&str> for Hash {
 impl std::fmt::Display for Hash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Hash::sha256(v) => write!(f, "{}", data_encoding::HEXLOWER.encode(v)), // no sha256:<hash>??
+            Hash::SHA256(v) => write!(f, "{}", data_encoding::HEXLOWER.encode(v)), // no sha256:<hash>??
             Hash::None => write!(f, "EMTPY-HASH"),
         }
     }
@@ -272,12 +272,12 @@ pub trait Store {
     //fn print_store_paths<'a>('a self, p: Vec<>)
 }
 
-pub async fn openStore(
+pub async fn open_store(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
 ) -> Result<Box<dyn Store>, StoreError> {
     if store_uri == "auto" {
-        let store = local_store::LocalStore::openStore("/nix/", params).await?;
+        let store = local_store::LocalStore::open_store("/nix/", params).await?;
         return Ok(Box::new(store));
     }
 
@@ -289,7 +289,7 @@ pub async fn openStore(
     }
 
     let path = &store_uri["file://".len()..];
-    let store = local_store::LocalStore::openStore(path, params).await?;
+    let store = local_store::LocalStore::open_store(path, params).await?;
     Ok(Box::new(store))
 }
 

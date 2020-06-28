@@ -5,7 +5,7 @@ pub mod store;
 
 pub mod crypto;
 
-pub use store::openStore;
+pub use store::open_store;
 pub use store::Store;
 
 use lazy_static::lazy_static;
