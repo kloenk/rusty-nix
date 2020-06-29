@@ -359,7 +359,7 @@ impl<'a> Connection<'a> {
         }
         trace!("string: {}", version);
 
-        self.parse("").await?;
+        self.parse("/build").await?; // TODO: file under /nix/store/<hash>-<name>/
         Ok(())
     }
 
@@ -464,7 +464,7 @@ impl<'a> Connection<'a> {
                         }
                     }
                 } else {
-                    let v = self.read_string().await?;
+                    let v = self.read_string().await.unwrap();
                     trace!("foobar: {}", v);
                 }
             }
@@ -476,12 +476,16 @@ impl<'a> Connection<'a> {
     pub async fn parse_contents(&self, state: &mut State) -> EmptyResult {
         /*let size = self.read_int().await?;
 
+
         let mut reader = self.reader.write().unwrap();
         let mut reader = reader.take(size);*/
         // TODO: this is very ugly
-        let data = self.read_string().await?;
+        info!("wrinting contend");
+        //let data = self.read_string().await?; // TODO: read_os_string()
+        let data = self.read_os_string().await?;
+        use std::os::unix::ffi::OsStrExt;
         if let State::File(v) = state {
-            v.write_all(data.as_bytes()).await?;
+            v.write_all(&data).await?;
         } else {
             return Err(StoreError::BadArchive {
                 msg: "not a file".to_string(),
@@ -493,15 +497,16 @@ impl<'a> Connection<'a> {
 
     pub async fn create_regulare_file(&self, path: &str) -> Result<State, StoreError> {
         // TOOD: magic with path?
-        let file = tokio::fs::OpenOptions::new()
-            .create_new(true)
-            .open(path)
-            .await?;
+        /*let file = tokio::fs::OpenOptions::new()
+        .create_new(true)
+        .open(path)
+        .await.unwrap();*/
+        let file = tokio::fs::File::create(path).await.unwrap();
         use std::os::unix::fs::PermissionsExt;
         let perms = std::fs::Permissions::from_mode(0o666);
         file.set_permissions(perms).await?;
 
-        trace!("creating file");
+        trace!("creating file: {}", path);
 
         Ok(State::File(file))
     }
@@ -536,30 +541,30 @@ impl<'a> Connection<'a> {
         }
     }
 
-    async fn read_string(&self) -> Result<String, StoreError> {
-        // TODO: this is very ugly. Find some better way to read_exact()
-        let len = self.read_int().await?; // TODO: orignal uses size_t??
+    async fn read_os_string(&self) -> Result<Vec<u8>, StoreError> {
+        let mut len = self.read_int().await?;
 
-        if len > 1024 {
-            return Err(StoreError::StringToLong { len: len as usize });
+        let mut buf: [u8; 1024] = [0; 1024];
+        let mut value = Vec::new();
+        let mut reader = self.reader.write().unwrap();
+
+        while len > 1024 {
+            reader.read_exact(&mut buf).await?;
+            value.extend_from_slice(&buf);
+            len = len - 1024;
         }
 
-        trace!("reading string with len {}", len);
-
-        let mut buf: [u8; 1024] = [0; 1024]; // FIME: bigger buffer size?
-
-        let mut reader = self.reader.write().unwrap();
-        reader.read_exact(&mut buf[0..len as usize]).await?;
+        reader.read_exact(&mut buf[..len as usize]).await?;
+        value.extend_from_slice(&buf[..len as usize]);
         drop(reader);
 
-        let value = String::from_utf8_lossy(&buf[0..len as usize]).to_string();
-
-        // read padding
         self.read_padding(len).await?;
 
-        trace!("read string {}", value);
-
         Ok(value)
+    }
+
+    async fn read_string(&self) -> Result<String, StoreError> {
+        Ok(String::from_utf8_lossy(&self.read_os_string().await?).to_string())
     }
 
     async fn write_string(&self, str: &str) -> EmptyResult {
