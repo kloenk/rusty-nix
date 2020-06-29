@@ -64,6 +64,8 @@ pub struct Connection<'a> {
     writer: Arc<RwLock<WriteHalf<'a>>>,
     reader: Arc<RwLock<ReadHalf<'a>>>,
 
+    hasher: RwLock<Option<ring::digest::Context>>,
+
     uid: u32,
     u_name: String,
 
@@ -83,12 +85,15 @@ impl<'a> Connection<'a> {
         let reader = Arc::new(RwLock::new(reader));
         let writer = Arc::new(RwLock::new(writer));
 
+        let hasher = RwLock::new(None);
+
         let logger = logger::TunnelLogger::new(client_version, writer.clone());
         Self {
             trusted,
             logger,
             reader,
             writer,
+            hasher,
             store,
             uid,
             u_name,
@@ -423,7 +428,9 @@ impl<'a> Connection<'a> {
                 } else if s == "executable" {
                     let s = self.read_string().await?;
                     if s != "" {
-                        return Err(StoreError::BadArchive{ msg: "executable marker has non-empty value".to_string() });
+                        return Err(StoreError::BadArchive {
+                            msg: "executable marker has non-empty value".to_string(),
+                        });
                     }
                     self.parse_set_executable(&path, &mut state).await?;
                 } else if s == "entry" {
@@ -505,12 +512,20 @@ impl<'a> Connection<'a> {
     }
 
     // TODO: cfg for macos?
-    pub async fn parse_create_symlink(&self, path: &str, target: &str) -> Result<State, StoreError> {
+    pub async fn parse_create_symlink(
+        &self,
+        path: &str,
+        target: &str,
+    ) -> Result<State, StoreError> {
         std::os::unix::fs::symlink(path, target)?;
         Ok(State::None) // TODO: magic?
     }
 
-    pub async fn parse_set_executable(&self, path: &str, state: &mut State) -> Result<(), StoreError> {
+    pub async fn parse_set_executable(
+        &self,
+        path: &str,
+        state: &mut State,
+    ) -> Result<(), StoreError> {
         if let State::File(v) = state {
             trace!("set executable bit");
             let mut perms = v.metadata().await?.permissions();
@@ -531,7 +546,7 @@ impl<'a> Connection<'a> {
         .await.unwrap();*/
         let file = tokio::fs::File::create(path).await.unwrap();
         use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o666);
+        let perms = std::fs::Permissions::from_mode(0o444);
         file.set_permissions(perms).await?;
 
         trace!("creating file: {}", path);
@@ -539,12 +554,22 @@ impl<'a> Connection<'a> {
         Ok(State::File(file))
     }
 
+    pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
+        let mut hasher = self.hasher.write().unwrap();
+        if let Some(v) = &mut *hasher {
+            v.update(data);
+        }
+
+        Ok(())
+    }
+
     // TODO: maybe implement own Async{Read,Write}Ext
-    async fn read_int(&self) -> std::io::Result<u64> {
+    async fn read_int(&self) -> Result<u64, StoreError> {
         let mut reader = self.reader.write().unwrap();
         let mut buf: [u8; 8] = [0; 8];
 
         reader.read_exact(&mut buf).await?;
+        self.update_hasher(&buf).await?;
 
         Ok(LittleEndian::read_u64(&buf))
     }
@@ -586,6 +611,7 @@ impl<'a> Connection<'a> {
         value.extend_from_slice(&buf[..len as usize]);
         drop(reader);
 
+        self.update_hasher(&value).await?;
         self.read_padding(len).await?;
 
         Ok(value)
@@ -639,6 +665,7 @@ impl<'a> Connection<'a> {
 
             let mut reader = self.reader.write().unwrap();
             reader.read_exact(&mut buf[0..len]).await?;
+            self.update_hasher(&buf[0..len]).await?;
             // TODO: check for non 0 values
         }
         Ok(())
