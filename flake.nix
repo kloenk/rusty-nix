@@ -36,7 +36,7 @@
 
             src = self;
 
-            outputs = [ "out" "doc" ]; # TODO: dev/doc?
+            #outputs = [ "out" "doc" ]; # TODO: dev/doc?
 
             buildInputs = buildDeps;
 

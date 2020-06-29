@@ -21,6 +21,8 @@ custom_error! {
         HashDecodeError { source: data_encoding::DecodeError } = "cannot decode: {source}",
         //HashDecodePartialError { source: data_encoding::DecodePartial } = "cannot decode {source}", // TODO: to_string missing on DecodePartial
         HashDecodePartialError { error: String } = "cannont decode {error}",
+        InvalidFileIngestionMethode { methode: u8 } = "invalid FileIngestionMethode: {methode}",
+        BadArchive{ msg: String } = "BadArchive: {msg}",
 }
 
 custom_error! {

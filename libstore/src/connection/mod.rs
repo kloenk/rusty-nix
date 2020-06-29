@@ -2,7 +2,7 @@ use std::sync::{Arc, RwLock};
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use log::{debug, error, trace, warn};
+use log::{debug, info, error, trace, warn};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{ReadHalf, WriteHalf};
@@ -16,6 +16,9 @@ pub const WORKER_MAGIC_2: u32 = 0x6478696f;
 pub const PROTOCOL_VERSION: u16 = 0x115;
 
 pub mod logger;
+//pub mod archive;
+
+pub const NARVERSIONMAGIC_1: &str = "nix-archive-1";
 
 #[derive(Debug)]
 struct ClientSettings {
@@ -27,7 +30,7 @@ struct ClientSettings {
     max_silent_time: u32,
     build_cores: u32,
     use_substitutes: bool,
-    overrides: std::collections::HashMap<String, Data>,
+    overrides: std::collections::HashMap<String, Data>, // TODO:: use libstore::store::Param
 }
 
 impl ClientSettings {
@@ -120,10 +123,11 @@ impl<'a> Connection<'a> {
             WorkerOp::WopSetOptions => self.set_options().await,
             WorkerOp::WopQueryPathInfo => self.query_path_info().await,
             WorkerOp::WopIsValidPath => self.is_valid_path().await,
-            WorkerOp::WopAddTempRoot => self.add_tmp_root().await,
+            WorkerOp::WopAddTempRoot => self.add_temp_root().await,
             WorkerOp::WopAddIndirectRoot => self.add_indirect_root().await,
             WorkerOp::WopSyncWithGC => self.sync_with_gc().await,
             WorkerOp::WopAddToStoreNar => self.add_to_store_nar().await,
+            WorkerOp::WopAddToStore => self.add_to_store().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -227,7 +231,7 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
-    async fn add_tmp_root(&mut self) -> EmptyResult {
+    async fn add_temp_root(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
         let path = std::path::PathBuf::from(&path);
 
@@ -323,6 +327,142 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+    async fn add_to_store(&self) -> EmptyResult {
+        let baseName = self.read_string().await?;
+        let fixed = self.read_int().await? != 0; // obsolete?
+        let methode = self.read_int().await?;
+        use std::convert::TryFrom;
+        let mut methode = super::store::FileIngestionMethod::try_from(methode)?;
+        let mut s = self.read_string().await?;
+
+        trace!("adding {} to store", baseName);
+
+        // Compatibility hack
+        if !fixed {
+            s = "sha256".to_string();
+            methode = super::store::FileIngestionMethod::Recursive;
+        }
+
+        self.parse_dump().await?;
+
+        Ok(())
+    }
+
+    pub async fn parse_dump(&self) -> EmptyResult { // TODO: return sha256?
+        let version = self.read_string().await?;
+        if version != NARVERSIONMAGIC_1 {
+            return Err(StoreError::BadArchive{ msg: "input does not look like a Nix Archive".to_string() });
+        }
+        trace!("string: {}", version);
+
+        self.parse("").await?;
+        Ok(())
+    }
+   
+    pub async fn parse(&self, path: &str) -> EmptyResult { // TODO: path<AsRef<Path>
+        let tag = self.read_string().await?;
+        if tag != "(" {
+            return Err(StoreError::BadArchive{ msg: "expected open tag".to_string() });
+        }
+
+        let mut f_type = Type::Unknown;
+        let mut state = State::None;
+
+        loop {
+            let s = self.read_string().await?;
+
+            if s == ")" {
+                break;
+            } else if s == "type" {
+                let t = self.read_string().await?;
+                if f_type != Type::Unknown {
+                    return Err(StoreError::BadArchive{ msg: "multiple type fileds".to_string() });
+                }
+                f_type = Type::from(t.as_str());
+
+                state = match f_type {
+                    Type::Unknown => return Err(StoreError::BadArchive{ msg: format!("Unknown file type: {}", t) }),
+                    Type::Regular => self.create_regulare_file(path).await?,
+                    Type::Symlink => {warn!("implement symlink"); state},
+                    Type::Directory => { warn!("implement dir"); state},
+                    _ => {warn!("ipmlement type"); State::None},
+                };
+
+                trace!("got type {:?}", f_type);
+                //f_type = Type::Unknown;
+            } else if s == "contents"{
+                self.parse_contents(&mut state).await?;
+            } else if s == "entry" {
+                // temp vars
+                let mut name = String::new();
+                let mut prev_name = String::new();
+
+                let s = self.read_string().await?;
+                if s != "(" {
+                    return Err(StoreError::BadArchive{ msg: "expected open tag".to_string() });
+
+                }
+                loop {
+                    // TODO: checkInterrupt()??
+
+                    let s = self.read_string().await?;
+                    if s == ")" {
+                        break;
+                    } else if s == "name" {
+                        name = self.read_string().await?;
+                        debug!("creating file {}", name);
+                        if name.len() == 0 || name == "." || name == ".." || name.find('/') != None || name.find("\0") != None {
+                            return Err(StoreError::BadArchive{ msg: format!("NAR contains invalid file name '{}'", name) });
+                        }
+                        if name <= prev_name {
+                            return Err(StoreError::BadArchive{ msg: "NAR directory is not sorted".to_string() });
+                        }
+                        prev_name = name.clone();
+                        // TODO: macos case hack
+                    } else if s == "node" {
+                        if name.len() == 0 {
+                            return Err(StoreError::BadArchive{ msg: "entry name is missign".to_string() });
+                        }
+                        self.parse(&format!("{}/{}", path, name)).await?;
+                    }
+                }
+            } else {
+                let v = self.read_string().await?;
+                trace!("foobar: {}", v);
+            }
+        }
+
+        Ok(())
+    }
+
+    pub async fn parse_contents(&self, state: &mut State) -> EmptyResult {
+        /*let size = self.read_int().await?;
+
+        let mut reader = self.reader.write().unwrap();
+        let mut reader = reader.take(size);*/
+        // TODO: this is very ugly
+        let data = self.read_string().await?;
+        if let State::File(v) = state {
+            v.write_all(data.as_bytes()).await?;
+        } else {
+            return Err(StoreError::BadArchive{ msg: "not a file".to_string() });
+        }
+
+        Ok(())
+    }
+
+    pub async fn create_regulare_file(&self, path: &str) -> Result<State, StoreError> {
+        // TOOD: magic with path?
+        let file = tokio::fs::OpenOptions::new().create_new(true).open(path).await?;
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o666);
+        file.set_permissions(perms).await?;
+
+        trace!("creating file");
+
+        Ok(State::File(file))
+    }
+
     // TODO: maybe implement own Async{Read,Write}Ext
     async fn read_int(&self) -> std::io::Result<u64> {
         let mut reader = self.reader.write().unwrap();
@@ -333,6 +473,7 @@ impl<'a> Connection<'a> {
         Ok(LittleEndian::read_u64(&buf))
     }
 
+    // TODO: maybe implement own Async{Read,Write}Ext
     async fn write_u64(&self, v: u64) -> EmptyResult {
         trace!("write the number {}", v);
         let mut buf: [u8; 8] = [0; 8];
@@ -415,6 +556,7 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+
     async fn read_padding(&self, len: u64) -> EmptyResult {
         if len % 8 != 0 {
             let mut buf: [u8; 8] = [0; 8];
@@ -447,4 +589,29 @@ impl<'a> Drop for Connection<'a> {
         //println!("> Dropping {}", self.name);
         debug!("dropping Connecton");
     }
+}
+
+
+#[derive(Debug, PartialEq)]
+pub enum Type {
+    Unknown,
+    Regular,
+    Directory,
+    Symlink,
+}
+
+impl std::convert::From<&str> for Type {
+    fn from(v: &str) -> Self {
+        match v {
+            "regular" => Type::Regular,
+            "directory" => Type::Directory,
+            "symlink" => Type::Symlink,
+            _ => Type::Unknown,
+        }
+    }
+}
+
+pub enum State {
+    None,
+    File(tokio::fs::File),
 }
