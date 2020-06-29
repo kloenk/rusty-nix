@@ -400,15 +400,18 @@ impl<'a> Connection<'a> {
                         }
                         Type::Regular => self.create_regulare_file(&path).await?,
                         Type::Symlink => {
-                            warn!("implement symlink");
-                            state
+                            let target = self.read_string().await?;
+                            self.parse_create_symlink(&path, &target).await?
                         }
                         Type::Directory => {
                             warn!("implement dir");
+                            // TODO: set permissions
+                            std::fs::create_dir_all(&path)?; // TODO: give into function for path magic?
                             state
                         }
                         _ => {
                             warn!("ipmlement type");
+                            panic!("unimplemented behavior");
                             State::None
                         }
                     };
@@ -417,6 +420,12 @@ impl<'a> Connection<'a> {
                 //f_type = Type::Unknown;
                 } else if s == "contents" {
                     self.parse_contents(&mut state).await?;
+                } else if s == "executable" {
+                    let s = self.read_string().await?;
+                    if s != "" {
+                        return Err(StoreError::BadArchive{ msg: "executable marker has non-empty value".to_string() });
+                    }
+                    self.parse_set_executable(&path, &mut state).await?;
                 } else if s == "entry" {
                     // temp vars
                     let mut name = String::new();
@@ -493,6 +502,25 @@ impl<'a> Connection<'a> {
         }
 
         Ok(())
+    }
+
+    // TODO: cfg for macos?
+    pub async fn parse_create_symlink(&self, path: &str, target: &str) -> Result<State, StoreError> {
+        std::os::unix::fs::symlink(path, target)?;
+        Ok(State::None) // TODO: magic?
+    }
+
+    pub async fn parse_set_executable(&self, path: &str, state: &mut State) -> Result<(), StoreError> {
+        if let State::File(v) = state {
+            trace!("set executable bit");
+            let mut perms = v.metadata().await?.permissions();
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o555);
+            v.set_permissions(perms).await?;
+        } else {
+            unimplemented!("non file executable bit");
+        }
+        Ok(()) // TODO: state magic?
     }
 
     pub async fn create_regulare_file(&self, path: &str) -> Result<State, StoreError> {
