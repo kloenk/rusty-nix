@@ -155,7 +155,14 @@ impl crate::Store for LocalStore {
                 });
             }
 
-            let path = path.canonicalize()?;
+            let path = path.canonicalize();
+            if let Err(v) = &path {
+                if v.kind() == std::io::ErrorKind::NotFound {
+                    trace!("cannot canon path");
+                    return Ok(false);
+                }
+            }
+            let path = path?;
             if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
                 return Err(StoreError::NotInStore {
                     path: path.to_string_lossy().to_string(),

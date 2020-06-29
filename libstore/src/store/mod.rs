@@ -298,7 +298,6 @@ pub fn print_store_path(v: &std::path::Path) -> String {
     v.display().to_string()
 }
 
-
 #[derive(Debug)]
 #[repr(u8)]
 pub enum FileIngestionMethod {
@@ -313,7 +312,9 @@ impl std::convert::TryFrom<u64> for FileIngestionMethod {
         match value {
             0 => Ok(FileIngestionMethod::Flat),
             1 => Ok(FileIngestionMethod::Recursive),
-            _ => Err(StoreError::InvalidFileIngestionMethode{ methode: value as u8}),
+            _ => Err(StoreError::InvalidFileIngestionMethode {
+                methode: value as u8,
+            }),
         }
     }
 }
