@@ -333,7 +333,7 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
-    async fn add_to_store(&self) -> EmptyResult {
+    async fn add_to_store(&mut self) -> EmptyResult {
         let baseName = self.read_string().await?;
         let fixed = self.read_int().await? != 0; // obsolete?
         let methode = self.read_int().await?;
@@ -349,12 +349,21 @@ impl<'a> Connection<'a> {
             methode = super::store::FileIngestionMethod::Recursive;
         }
 
-        self.parse_dump().await?;
+        self.logger.start_work().await?;
+
+        self.parse_dump(&baseName).await?;
+        // TODO: move path into store
+        // How is the Hash calculated? from fixed output?
+        warn!("get hash");
+
+        self.logger.stop_work(logger::WORKDONE).await?;
+        // return store path to nix client
+        warn!("return path");
 
         Ok(())
     }
 
-    pub async fn parse_dump(&self) -> EmptyResult {
+    pub async fn parse_dump(&mut self, path: &str) -> EmptyResult {
         // TODO: return sha256?
         let version = self.read_string().await?;
         if version != NARVERSIONMAGIC_1 {
@@ -364,7 +373,25 @@ impl<'a> Connection<'a> {
         }
         trace!("string: {}", version);
 
-        self.parse("/build").await?; // TODO: file under /nix/store/<hash>-<name>/
+        let hasher = ring::digest::Context::new(&ring::digest::SHA256);
+        let mut hash = self.hasher.write().unwrap();
+        *hash = Some(hasher);
+        drop(hash);
+
+        // TODO: get store from self.store
+        // TODO: makeTempDir
+        self.parse(&format!("/tmp/nix-build.xxxx/{}", path)).await?; // TODO: file under /nix/store/<hash>-<name>/
+
+        let mut hash = self.hasher.write().unwrap();
+        let hash = hash.take().unwrap(); // TODO: can other move it?
+        let hash = hash.finish();
+        let hash = hash.as_ref().to_vec();
+
+        //let hash = super::store::Hash::SHA256(&hash);
+        let hash = super::store::Hash::from_sha256_vec(&hash)?;
+        let hash = hash.to_base32()?;
+        trace!("got hash {}", hash);
+
         Ok(())
     }
 

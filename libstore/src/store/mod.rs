@@ -190,6 +190,23 @@ impl Hash {
                  //base64::decode_config_slice(v, base64::STANDARD, &mut buf)?;
         Ok(Hash::SHA256(buf))
     }
+    pub fn from_sha256_vec(v: &[u8]) -> Result<Self, StoreError> {
+        let mut buf: [u8; 32] = [0; 32];
+        buf.copy_from_slice(v); // TODO: no panicing
+        Ok(Hash::SHA256(buf))
+    }
+
+    pub fn to_base32(&self) -> Result<String, StoreError> {
+        match self {
+            Hash::SHA256(v) => {
+                let v = data_encoding::BASE32.encode(v);
+                Ok(v)
+            }
+            _ => Err(StoreError::BadArchive {
+                msg: "base32 error".to_string(),
+            }), // TODO: better error type
+        }
+    }
 }
 
 impl std::convert::From<&str> for Hash {
