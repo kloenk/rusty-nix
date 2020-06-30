@@ -176,6 +176,7 @@ impl Eq for ValidPathInfo {}
 #[derive(Debug, Eq, PartialEq)]
 pub enum Hash {
     SHA256([u8; 32]),
+    Compressed(Vec<u8>),
     None,
 }
 
@@ -206,6 +207,21 @@ impl Hash {
                 msg: "base32 error".to_string(),
             }), // TODO: better error type
         }
+    }
+
+    pub fn compress_hash(self, len: usize) -> Result<Self, StoreError> {
+        //let mut vec=  Vec::with_capacity(len);
+        let mut vec = vec![0; len];
+        if let Hash::SHA256(v) = self {
+            for i in 0..v.len() {
+                vec[i % len] ^= v[i];
+            }
+        } else {
+            return Err(StoreError::Unimplemented {
+                msg: "compress_hash".to_string(),
+            });
+        }
+        Ok(Hash::Compressed(vec))
     }
 }
 
@@ -238,6 +254,13 @@ impl std::fmt::Display for Hash {
         match self {
             Hash::SHA256(v) => write!(f, "{}", data_encoding::HEXLOWER.encode(v)), // no sha256:<hash>??
             Hash::None => write!(f, "EMTPY-HASH"),
+            Hash::Compressed(v) => {
+                let mut spec = data_encoding::Specification::new();
+                spec.symbols.push_str("0123456789abcdfghijklmnpqrsvwxyz"); // TODO: make global version
+                let s = spec.encoding().unwrap().encode(v);
+                write!(f, "{}", s)
+                /*let s = data_encoding::BASE32_NOPAD.encode(v).to_ascii_lowercase(); write!(f, "{}", s)*/
+            }
         }
     }
 }
@@ -276,6 +299,32 @@ pub trait Store {
         &'a mut self,
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn make_store_path<'a>(
+        &'a mut self,
+        file_type: &'a str,
+        hash: Hash,
+        name: &'a str,
+    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        // TODO: ValidPath as result?
+        LocalFutureObj::new(Box::new(async move {
+            /*let s = format!(
+                "{}:{}:{}:{}",
+                file_type,
+                hash.to_string(), // TODO: is this the correct type?
+                self.get_store_dir().await?,
+                name
+            );
+            //let s = self.compressHash(HashString::SHA256(s), 20);*/
+ // TODO: why does nix upstream goes via the hashString, instead direct Hash?
+            let hash = hash.compress_hash(20)?;
+            //let s = hash.to_string();
+            let s = format!("{}/{}-{}", self.get_store_dir().await?, hash, name);
+            warn!("writing to {}", s);
+
+            Ok(s)
+        }))
+    }
 
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 

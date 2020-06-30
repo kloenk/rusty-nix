@@ -334,14 +334,14 @@ impl<'a> Connection<'a> {
     }
 
     async fn add_to_store(&mut self) -> EmptyResult {
-        let baseName = self.read_string().await?;
+        let base_name = self.read_string().await?;
         let fixed = self.read_int().await? != 0; // obsolete?
         let methode = self.read_int().await?;
         use std::convert::TryFrom;
         let mut methode = super::store::FileIngestionMethod::try_from(methode)?;
         let mut s = self.read_string().await?;
 
-        trace!("adding {} to store", baseName);
+        trace!("adding {} to store", base_name);
 
         // Compatibility hack
         if !fixed {
@@ -351,7 +351,7 @@ impl<'a> Connection<'a> {
 
         self.logger.start_work().await?;
 
-        self.parse_dump(&baseName).await?;
+        let hash = self.parse_dump(&base_name).await?;
         // TODO: move path into store
         // How is the Hash calculated? from fixed output?
         warn!("get hash");
@@ -359,11 +359,14 @@ impl<'a> Connection<'a> {
         self.logger.stop_work(logger::WORKDONE).await?;
         // return store path to nix client
         warn!("return path");
+        warn!("hash: {}", hash);
+        // TODO: add to sql database
+        self.write_string(&hash).await?; // TODO: rename to path
 
         Ok(())
     }
 
-    pub async fn parse_dump(&mut self, path: &str) -> EmptyResult {
+    pub async fn parse_dump(&mut self, path: &str) -> Result<String, StoreError> {
         // TODO: return sha256?
         let version = self.read_string().await?;
         if version != NARVERSIONMAGIC_1 {
@@ -380,7 +383,9 @@ impl<'a> Connection<'a> {
 
         // TODO: get store from self.store
         // TODO: makeTempDir
-        self.parse(&format!("/tmp/nix-build.xxxx/{}", path)).await?; // TODO: file under /nix/store/<hash>-<name>/
+        let store_dir = self.store.get_store_dir().await?;
+        let extract_file = format!("{}/.temp/{}", store_dir, path);
+        self.parse(&extract_file).await?; // TODO: file under /nix/store/<hash>-<name>/
 
         let mut hash = self.hasher.write().unwrap();
         let hash = hash.take().unwrap(); // TODO: can other move it?
@@ -389,10 +394,11 @@ impl<'a> Connection<'a> {
 
         //let hash = super::store::Hash::SHA256(&hash);
         let hash = super::store::Hash::from_sha256_vec(&hash)?;
-        let hash = hash.to_base32()?;
-        trace!("got hash {}", hash);
+        let hash = hash.compress_hash(20)?;
+        let result = format!("{}/{}-{}", store_dir, hash, path).replace("//", "/");
+        std::fs::rename(extract_file, &result)?;
 
-        Ok(())
+        Ok(result)
     }
 
     pub fn parse(&self, path: &str) -> LocalFutureObj<EmptyResult> {

@@ -23,6 +23,8 @@ custom_error! {
         HashDecodePartialError { error: String } = "cannont decode {error}",
         InvalidFileIngestionMethode { methode: u8 } = "invalid FileIngestionMethode: {methode}",
         BadArchive{ msg: String } = "BadArchive: {msg}",
+
+        Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
 
 custom_error! {
