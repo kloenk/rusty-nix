@@ -209,6 +209,12 @@ impl Hash {
                  //base64::decode_config_slice(v, base64::STANDARD, &mut buf)?;
         Ok(Hash::SHA256(buf))
     }
+    pub fn is_sha256(&self) -> bool {
+        match self {
+            Hash::SHA256(_) => true,
+            _ => false,
+        }
+    }
     pub fn from_sha256_vec(v: &[u8]) -> Result<Self, StoreError> {
         let mut buf: [u8; 32] = [0; 32];
         buf.copy_from_slice(v); // TODO: no panicing
@@ -248,6 +254,21 @@ impl Hash {
         match self {
             Hash::SHA256(v) => format!("sha256:{}", data_encoding::HEXLOWER.encode(v)),
             _ => "unsuported".to_string(),
+        }
+    }
+
+    pub fn hash_string(s: &str) -> Result<Hash, StoreError> {
+        // read hash type from s
+        let ht: Vec<&str> = s.split(':').collect();
+        if ht.len() < 2 {
+            unimplemented!("invalid hash string");
+        }
+        let ht = ht[1];
+        match ht {
+            "sha256" => Hash::from_sha256_vec(
+                ring::digest::digest(&ring::digest::SHA256, s.as_bytes()).as_ref(),
+            ),
+            _ => unimplemented!("not sha256"),
         }
     }
 }
@@ -331,31 +352,54 @@ pub trait Store {
         &'a mut self,
         suffix: &'a str,
         data: &'a [u8],
-        refs: &'a [&'a str],
+        refs: &'a Vec<String>,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
-
-    fn make_text_path<'a>(
-        &'a mut self,
-        suffix: &'a str,
-        hash: &'a Hash,
-        refs: &'a [&'a str],
-    ) -> LocalFutureObj<'a, Result<String, StoreError>>;
 
     fn add_temp_root<'a>(
         &'a mut self,
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
+    fn make_type(&self, path_type: &str, refs: &Vec<String>, has_self_ref: bool) -> String {
+        let mut res = String::from(path_type);
+        for v in refs {
+            res.push(':');
+            res.push_str(v); // TODO: use self.printStorePath?
+        }
+        if has_self_ref {
+            res.push_str(":self");
+        }
+
+        res
+    }
+
+    fn make_text_path<'a>(
+        &'a mut self,
+        suffix: &'a str,
+        hash: &'a Hash,
+        refs: &'a Vec<String>,
+    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if !hash.is_sha256() {
+                return Err(StoreError::MissingHash {
+                    path: "wrong hash".to_string(),
+                });
+            }
+            let path_type = self.make_type("text", refs, false); // TODO: is this realy false?
+            self.make_store_path(&path_type, hash, suffix).await
+        }))
+    }
+
     fn make_store_path<'a>(
         &'a mut self,
         file_type: &'a str,
-        hash: Hash,
+        hash: &'a Hash,
         name: &'a str,
     ) -> LocalFutureObj<'a, Result<String, StoreError>> {
         // TODO: ValidPath as result?
         LocalFutureObj::new(Box::new(async move {
-            /*let s = format!(
+            /*/*let s = format!(
                 "{}:{}:{}:{}",
                 file_type,
                 hash.to_string(), // TODO: is this the correct type?
@@ -367,7 +411,23 @@ pub trait Store {
             let hash = hash.compress_hash(20)?;
             //let s = hash.to_string();
             let s = format!("{}/{}-{}", self.get_store_dir().await?, hash, name);
-            warn!("writing to {}", s);
+            warn!("writing to {}", s);*/
+            let s = format!(
+                "{}:{}:{}:{}",
+                file_type,
+                hash.to_sql_string(),
+                self.get_store_dir().await?,
+                name
+            ); // TODO: remove sha256
+            let hash = Hash::hash_string(&s)?;
+            let hash = hash.compress_hash(20)?;
+
+            let s = format!(
+                "{}/{}-{}",
+                self.get_store_dir().await?,
+                hash,
+                name
+            );
 
             Ok(s)
         }))

@@ -444,7 +444,7 @@ impl crate::Store for LocalStore {
         &'a mut self,
         suffix: &'a str,
         data: &'a [u8],
-        refs: &'a [&'a str],
+        refs: &'a Vec<String>,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
@@ -452,21 +452,20 @@ impl crate::Store for LocalStore {
             let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
 
             let dest_path = self.make_text_path(suffix, &hash, refs).await?;
+            trace!("will write texte to {}", dest_path);
 
             unimplemented!()
         }))
     }
 
-    fn make_text_path<'a>(
+    /*fn make_text_path<'a>(
         &'a mut self,
         suffix: &'a str,
         hash: &'a super::Hash,
-        refs: &'a [&'a str],
+        refs: &'a Vec<String>,
     ) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            unimplemented!()
-        }))
-    }
+        LocalFutureObj::new(Box::new(async move { unimplemented!() }))
+    }*/
 }
 
 // FIXME

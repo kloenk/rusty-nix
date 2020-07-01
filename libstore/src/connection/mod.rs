@@ -135,6 +135,7 @@ impl<'a> Connection<'a> {
             WorkerOp::WopAddToStoreNar => self.add_to_store_nar().await,
             WorkerOp::WopAddToStore => self.add_to_store().await,
             WorkerOp::WopEnsurePath => self.ensure_path().await,
+            WorkerOp::WopAddTextToStore => self.add_text_to_store().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -374,10 +375,13 @@ impl<'a> Connection<'a> {
         let refs = self.read_strings().await?;
 
         self.logger.start_work().await?;
-        let path = self.store.addTextToStore(suffix, s, refs, false).await?;
+        let path = self
+            .store
+            .add_text_to_store(&suffix, &s, &refs, false)
+            .await?;
         self.logger.stop_work(logger::WORKDONE).await?;
 
-        self.write_string(path).await?;
+        self.write_string(&path.to_string()).await?;
 
         Ok(())
     }
