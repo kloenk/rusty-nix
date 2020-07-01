@@ -1,3 +1,4 @@
+use super::ValidPathInfo;
 use crate::error::StoreError;
 use log::{debug, trace, warn};
 
@@ -176,6 +177,82 @@ impl crate::Store for LocalStore {
                 .unwrap_or(false);
 
             Ok(data)
+        }))
+    }
+
+    fn register_path<'a>(
+        &'a mut self,
+        info: ValidPathInfo,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            trace!("will register path {:?}", info);
+            let path = info.path.canonicalize()?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
+
+            let sqlite = self.sqlite.write().unwrap();
+            //let mut stm = sqlite.prepare("INSERT INTO ValidPaths (path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca) values (?, ?, ?, ?, ?, ?, ?, ?);")?; // TODO: prepare those in a state object or so
+
+            //let data = stm.execute(&path.display().to_string(), &info.nar_hash.to_sql_string(), &info.registration_time.timestamp().to_string(), &deriver, &nar_size, ]);
+            /*let data = stm.execute(
+                rusqlite::params![
+                    path.display().to_string(),
+                    info.nar_hash.to_sql_string(),
+                    info.registration_time.timestamp(),
+                    deriver,
+                    nar_size,
+                    info.ultimate,
+                    "", // TODO: sigs
+                    "", // TODO: CA
+                ]
+            )?;*/
+
+            //sqlite.execute("INSERT INTO ValidPaths (path, hash, registrationTime, registrationTime) values (?path", )
+            /*let mut params = rusqlite::named_params! {
+                ":path": path.display().to_string(),
+                ":hash": info.nar_hash.to_sql_string(),
+                ":registrationTime": info.registration_time.timestamp().to_string(),
+
+            };*/
+            let path_str = path.display().to_string();
+            let hash = info.nar_hash.to_sql_string();
+            let reg_time = info.registration_time.timestamp();
+            let mut deriver = String::new();
+            let mut nar_size = 0;
+            let mut vec: Vec<(&str, &dyn rusqlite::ToSql)> = vec![
+                (":path", &path_str),
+                (":hash", &hash),
+                (":registrationTime", &reg_time),
+            ];
+            if let Some(v) = &info.deriver {
+                deriver = v.display().to_string();
+                vec.push((":deriver", &deriver));
+            }
+            if let Some(nar) = info.nar_size {
+                nar_size = nar as i64; //  u64 is not supported
+                vec.push((":narSize", &nar_size));
+            }
+            if info.ultimate {
+                vec.push((":ultimate", &1));
+            }
+            // TODO: sigs, ca
+            let data = sqlite.execute_named("INSERT INTO ValidPaths (path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca) values (:path, :hash, :registrationTime, :deriver, :narSize, :ultimate, :sigs, :ca);", &vec)?; // TODO: prepare those in a state object or so
+
+            trace!("data: {:?}", data);
+
+            Ok(sqlite.query_row(
+                "SELECT id FROM ValidPaths WHERE path = (?)",
+                &[&path_str],
+                move |row| {
+                    let mut info = info.clone();
+                    let id = row.get::<usize, isize>(0)?;
+                    info.id = id as u64;
+                    Ok(info)
+                },
+            )?)
         }))
     }
 

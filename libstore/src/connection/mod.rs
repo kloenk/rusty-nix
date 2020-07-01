@@ -64,7 +64,7 @@ pub struct Connection<'a> {
     writer: Arc<RwLock<WriteHalf<'a>>>,
     reader: Arc<RwLock<ReadHalf<'a>>>,
 
-    hasher: RwLock<Option<ring::digest::Context>>,
+    hasher: RwLock<Option<(ring::digest::Context, usize)>>,
 
     uid: u32,
     u_name: String,
@@ -361,12 +361,16 @@ impl<'a> Connection<'a> {
         warn!("return path");
         warn!("hash: {}", hash);
         // TODO: add to sql database
-        self.write_string(&hash).await?; // TODO: rename to path
+        self.write_string(&hash.to_string()).await?; // TODO: rename to path
 
         Ok(())
     }
 
-    pub async fn parse_dump(&mut self, path: &str) -> Result<String, StoreError> {
+    pub async fn parse_dump(
+        &mut self,
+        path: &str,
+    ) -> Result<super::store::ValidPathInfo, StoreError> {
+        use super::store::ValidPathInfo;
         // TODO: return sha256?
         let version = self.read_string().await?;
         if version != NARVERSIONMAGIC_1 {
@@ -378,7 +382,7 @@ impl<'a> Connection<'a> {
 
         let hasher = ring::digest::Context::new(&ring::digest::SHA256);
         let mut hash = self.hasher.write().unwrap();
-        *hash = Some(hasher);
+        *hash = Some((hasher, 0));
         drop(hash);
 
         // TODO: get store from self.store
@@ -389,14 +393,19 @@ impl<'a> Connection<'a> {
 
         let mut hash = self.hasher.write().unwrap();
         let hash = hash.take().unwrap(); // TODO: can other move it?
-        let hash = hash.finish();
+        let size = hash.1;
+        let hash = hash.0.finish();
         let hash = hash.as_ref().to_vec();
 
         //let hash = super::store::Hash::SHA256(&hash);
         let hash = super::store::Hash::from_sha256_vec(&hash)?;
-        let hash = hash.compress_hash(20)?;
-        let result = format!("{}/{}-{}", store_dir, hash, path).replace("//", "/");
+        let hash_compressed = hash.clone();
+        let hash_compressed = hash_compressed.compress_hash(20)?;
+        let result = format!("{}/{}-{}", store_dir, hash_compressed, path).replace("//", "/");
         std::fs::rename(extract_file, &result)?;
+
+        let result = ValidPathInfo::now(&result, hash, size as u64)?;
+        let result = self.store.register_path(result).await?;
 
         Ok(result)
     }
@@ -590,7 +599,8 @@ impl<'a> Connection<'a> {
     pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
         let mut hasher = self.hasher.write().unwrap();
         if let Some(v) = &mut *hasher {
-            v.update(data);
+            v.1 += data.len();
+            v.0.update(data);
         }
 
         Ok(())

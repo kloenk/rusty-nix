@@ -13,7 +13,7 @@ use chrono::NaiveDateTime;
 pub mod local_store;
 pub mod protocol;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ValidPathInfo {
     pub path: std::path::PathBuf,
     pub deriver: Option<std::path::PathBuf>,
@@ -60,6 +60,22 @@ pub struct ValidPathInfo {
 }
 
 impl ValidPathInfo {
+    pub fn now(path: &str, hash: Hash, size: u64) -> Result<ValidPathInfo, StoreError> {
+        use chrono::prelude::*;
+        let now: DateTime<Utc> = Utc::now();
+        Ok(Self {
+            path: std::path::PathBuf::from(path),
+            deriver: None,
+            nar_hash: hash,
+            references: Vec::new(),
+            registration_time: now.naive_utc(),
+            nar_size: Some(size),
+            ca: None,
+            id: 0,
+            sigs: Vec::new(),
+            ultimate: false,
+        })
+    }
     /// Return a fingerprint of the store path to be used in binary
     /// cache signatures. It contains the store path, the base-32
     /// SHA-256 hash of the NAR serialisation of the path, the size of
@@ -158,9 +174,11 @@ impl std::convert::From<String> for ValidPathInfo {
 }
 
 impl std::fmt::Display for ValidPathInfo {
+    /// This only returns a path.
+    // TODO: maby add an extra type which makes a more verbose output with usage like std::path::PathBuf.display()
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: more verbose output?
-        write!(f, "validPath:{}", self.path.display())
+        write!(f, "{}", self.path.display())
     }
 }
 
@@ -173,7 +191,7 @@ impl PartialEq for ValidPathInfo {
 }
 impl Eq for ValidPathInfo {}
 
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum Hash {
     SHA256([u8; 32]),
     Compressed(Vec<u8>),
@@ -210,6 +228,7 @@ impl Hash {
     }
 
     pub fn compress_hash(self, len: usize) -> Result<Self, StoreError> {
+        // TODO: only take a referenc, so no cloning is needed? (or even return another type?)
         //let mut vec=  Vec::with_capacity(len);
         let mut vec = vec![0; len];
         if let Hash::SHA256(v) = self {
@@ -222,6 +241,14 @@ impl Hash {
             });
         }
         Ok(Hash::Compressed(vec))
+    }
+
+    pub fn to_sql_string(&self) -> String {
+        // TODO: return StoreError for none?
+        match self {
+            Hash::SHA256(v) => format!("sha256:{}", data_encoding::HEXLOWER.encode(v)),
+            _ => "unsuported".to_string(),
+        }
     }
 }
 
@@ -282,6 +309,11 @@ pub trait Store {
         path: &'a std::path::Path,
     ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
 
+    fn register_path<'a>(
+        &'a mut self,
+        info: ValidPathInfo,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
+
     fn delete_path<'a>(
         &'a mut self,
         path: &std::path::PathBuf,
@@ -316,7 +348,7 @@ pub trait Store {
                 name
             );
             //let s = self.compressHash(HashString::SHA256(s), 20);*/
- // TODO: why does nix upstream goes via the hashString, instead direct Hash?
+            // TODO: why does nix upstream goes via the hashString, instead direct Hash?
             let hash = hash.compress_hash(20)?;
             //let s = hash.to_string();
             let s = format!("{}/{}-{}", self.get_store_dir().await?, hash, name);
