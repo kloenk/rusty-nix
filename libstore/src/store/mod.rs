@@ -327,6 +327,21 @@ pub trait Store {
         check_sigs: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
+    fn add_text_to_store<'a>(
+        &'a mut self,
+        suffix: &'a str,
+        data: &'a [u8],
+        refs: &'a [&'a str],
+        repair: bool,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
+
+    fn make_text_path<'a>(
+        &'a mut self,
+        suffix: &'a str,
+        hash: &'a Hash,
+        refs: &'a [&'a str],
+    ) -> LocalFutureObj<'a, Result<String, StoreError>>;
+
     fn add_temp_root<'a>(
         &'a mut self,
         path: &std::path::PathBuf,

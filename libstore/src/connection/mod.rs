@@ -134,6 +134,7 @@ impl<'a> Connection<'a> {
             WorkerOp::WopSyncWithGC => self.sync_with_gc().await,
             WorkerOp::WopAddToStoreNar => self.add_to_store_nar().await,
             WorkerOp::WopAddToStore => self.add_to_store().await,
+            WorkerOp::WopEnsurePath => self.ensure_path().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -363,6 +364,33 @@ impl<'a> Connection<'a> {
         // TODO: add to sql database
         self.write_string(&hash.to_string()).await?; // TODO: rename to path
 
+        Ok(())
+    }
+
+    async fn add_text_to_store(&mut self) -> EmptyResult {
+        let suffix = self.read_string().await?;
+        let s = self.read_os_string().await?;
+
+        let refs = self.read_strings().await?;
+
+        self.logger.start_work().await?;
+        let path = self.store.addTextToStore(suffix, s, refs, false).await?;
+        self.logger.stop_work(logger::WORKDONE).await?;
+
+        self.write_string(path).await?;
+
+        Ok(())
+    }
+
+    async fn ensure_path(&mut self) -> EmptyResult {
+        let path = self.read_string().await?;
+        trace!("ensure path {}", path);
+
+        self.logger.start_work().await?;
+        //self.store.ensure_path(path).await?; // TODO: implement
+        self.logger.stop_work(logger::WORKDONE).await?;
+
+        self.write_u64(1).await?;
         Ok(())
     }
 

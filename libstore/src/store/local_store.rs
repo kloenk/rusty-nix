@@ -243,7 +243,7 @@ impl crate::Store for LocalStore {
 
             trace!("data: {:?}", data);
 
-            Ok(sqlite.query_row(
+            let info = sqlite.query_row(
                 "SELECT id FROM ValidPaths WHERE path = (?)",
                 &[&path_str],
                 move |row| {
@@ -252,7 +252,13 @@ impl crate::Store for LocalStore {
                     info.id = id as u64;
                     Ok(info)
                 },
-            )?)
+            )?;
+            // TODO: references
+            if info.references.len() != 0 {
+                unimplemented!()
+            }
+
+            Ok(info)
         }))
     }
 
@@ -431,6 +437,33 @@ impl crate::Store for LocalStore {
 
             // outputLock.setDeletion
 
+            unimplemented!()
+        }))
+    }
+    fn add_text_to_store<'a>(
+        &'a mut self,
+        suffix: &'a str,
+        data: &'a [u8],
+        refs: &'a [&'a str],
+        repair: bool,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let hash = ring::digest::digest(&ring::digest::SHA256, data);
+            let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+            let dest_path = self.make_text_path(suffix, &hash, refs).await?;
+
+            unimplemented!()
+        }))
+    }
+
+    fn make_text_path<'a>(
+        &'a mut self,
+        suffix: &'a str,
+        hash: &'a super::Hash,
+        refs: &'a [&'a str],
+    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
             unimplemented!()
         }))
     }
