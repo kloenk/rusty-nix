@@ -353,10 +353,7 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    fn add_temp_root<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             warn!("add_temp_root not yet implemented for LocalStore");
             Ok(())
@@ -387,7 +384,7 @@ impl crate::Store for LocalStore {
             }
             // TODO: return err if sig is missing
 
-            self.add_temp_root(&path.path).await?;
+            self.add_temp_root(&path.path.to_str().unwrap()).await?;
 
             if repair || !self.is_valid_path(&path.path).await? {
                 self.delete_path(&path.path);
@@ -453,6 +450,34 @@ impl crate::Store for LocalStore {
 
             let dest_path = self.make_text_path(suffix, &hash, refs).await?;
             trace!("will write texte to {}", dest_path);
+
+            self.add_temp_root(&dest_path).await?;
+
+            if repair
+                || !self
+                    .is_valid_path(&std::path::Path::new(&dest_path))
+                    .await?
+            {
+                // TODO: make realpath?
+
+                //self.delete_path(dest_path);
+                let rm = tokio::fs::remove_file(&dest_path).await; // magic like moving to /nix/store/.thrash
+                trace!("rm: {:?}", rm);
+
+                //self.autoGC()
+
+                let mut file = tokio::fs::File::create(&dest_path).await?;
+                use tokio::io::AsyncWriteExt;
+                file.write_all(data).await?;
+
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o444);
+                file.set_permissions(perms).await?;
+
+                file.sync_all().await?; // TODO: put behind settings
+
+                // dumpString(data)
+            }
 
             unimplemented!()
         }))

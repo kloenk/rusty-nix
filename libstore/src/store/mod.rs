@@ -356,10 +356,7 @@ pub trait Store {
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
-    fn add_temp_root<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn make_type(&self, path_type: &str, refs: &Vec<String>, has_self_ref: bool) -> String {
         let mut res = String::from(path_type);
@@ -422,12 +419,7 @@ pub trait Store {
             let hash = Hash::hash_string(&s)?;
             let hash = hash.compress_hash(20)?;
 
-            let s = format!(
-                "{}/{}-{}",
-                self.get_store_dir().await?,
-                hash,
-                name
-            );
+            let s = format!("{}/{}-{}", self.get_store_dir().await?, hash, name);
 
             Ok(s)
         }))
