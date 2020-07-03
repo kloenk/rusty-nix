@@ -36,7 +36,7 @@
 
             src = self;
 
-            outputs = [ "out" "doc" ]; # TODO: dev/doc?
+            #outputs = [ "out" "doc" ]; # TODO: dev/doc?
 
             buildInputs = buildDeps;
 
@@ -45,12 +45,12 @@
             cargoSha256 =
               "af3738dabeba35e07b71f0b6c96c551ef46618971763360fbad804def32528ea";
 
-            postInstall = ''
-              cargo doc --workspace --release --all-features --frozen --offline --target-dir $doc
-
-              mkdir -p $doc/nix-support/
-              echo "doc manual $doc/" >> $doc/nix-support/hydra-build-products
-            '';
+#            postInstall = ''
+#              cargo doc --workspace --release --all-features --frozen --offline --target-dir $doc
+#
+#              mkdir -p $doc/nix-support/
+#              echo "doc manual $doc/" >> $doc/nix-support/hydra-build-products
+#            '';
 
           });
       };
