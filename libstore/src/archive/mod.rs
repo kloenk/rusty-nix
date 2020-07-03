@@ -77,6 +77,11 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                         Type::Regular => State::File(path.to_owned()),
                         _ => unimplemented!()
                     }
+                } else if s == "contents" {
+                    match state {
+                        State::File(v) => store.write_regular_file(v, self.read_os_string().await?).await?;
+                        _ => unimplemented!(),
+                    }
                 }
             }
             Ok(())
@@ -173,4 +178,7 @@ impl std::convert::From<&str> for Type {
 pub enum State { // TODO: only store references for less memory footprint?
     None,
     File(String),
+    Executable(String),
+    Directory(String),
+    Symlink(String),
 }
