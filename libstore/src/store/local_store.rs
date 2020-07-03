@@ -5,6 +5,7 @@ use log::{debug, trace, warn};
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
+use tokio::io::AsyncWrite;
 
 use std::sync::{Arc, RwLock};
 
@@ -369,6 +370,30 @@ impl crate::Store for LocalStore {
             Ok(())
         }))
     }
+
+    fn write_regular_file<'a>(&'a mut self, path: &str, data: &[u8]) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_string();
+        LocalFutureObj::new(Box::new(async move {
+            warn!("implement writefile for {}", path);
+            Ok(())
+        }))
+    }
+
+    /*fn write_regular_file<'a>(
+        &'a mut self,
+        path: &'a str,
+        data: &[u8],
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new( async move {
+            let file = tokio::fs::File::create(&path).await?; // TODO: rm befor create?
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o444);
+            file.set_permissions(perms).await?;
+
+            Ok(())
+        }))
+    }*/
 
     fn add_to_store<'a>(
         &'a mut self,
