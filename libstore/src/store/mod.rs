@@ -1,17 +1,28 @@
-use crate::error::StoreError;
-
 use std::sync::{Arc, RwLock};
 
 use log::{debug, info, trace, warn};
 
 // for async trait
-use futures::future::LocalFutureObj;
-use std::boxed::Box;
+
+/// These are exported, because there are needed for async traits
+pub use futures::future::LocalFutureObj;
+/// These are exported, because there are needed for async traits
+pub use std::boxed::Box;
+
+pub use crate::error::StoreError;
 
 use chrono::NaiveDateTime;
 
 pub mod local_store;
 pub mod protocol;
+
+/// This is a store backend wich does not save things onto db
+#[cfg(test)]
+pub mod mock_store;
+
+/// This is incuded to check that no field are forgotten to add
+#[cfg(test)]
+pub mod store_template;
 
 #[derive(Debug, Clone)]
 pub struct ValidPathInfo {
@@ -442,6 +453,12 @@ pub trait Store {
     }
 
     //fn print_store_paths<'a>('a self, p: Vec<>)
+
+    // this is needed for testing
+    #[cfg(test)]
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub async fn open_store(

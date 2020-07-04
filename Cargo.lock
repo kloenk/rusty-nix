@@ -385,6 +385,7 @@ dependencies = [
  "chrono",
  "custom_error",
  "data-encoding",
+ "env_logger",
  "futures",
  "lazy_static",
  "libc",
