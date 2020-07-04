@@ -42,5 +42,9 @@ custom_error! {
         InvalidExecutableMarker{} = "executable marker has non-empty value",
         ReadError{source: std::io::Error} = "could not read nar: {source}",
         StoreError{source: StoreError} = "StoreError: {source}",
+        InvalidFileName{name: String} = "NAR contains invalid file name: '{name}'",
+        NotSorted{} = "NAR archive is not sorted",
+        MissingName{} = "etry name is missing",
+        InvalidSymlinkMarker{ marker: String } = "invalid target marker for symlink: '{marker}'",
         InvalidState{state: crate::archive::State } = "InvalidState: {state}", // TODO: add case info
 }

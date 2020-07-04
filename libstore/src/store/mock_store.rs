@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
@@ -8,7 +10,6 @@ use std::collections::HashMap;
 
 use log::*;
 
-
 pub struct File {
     pub content: Vec<u8>,
     pub executable: bool,
@@ -16,12 +17,16 @@ pub struct File {
 
 pub struct MockStore {
     files: HashMap<String, File>,
+    symlinks: HashMap<String, String>,
+    dirs: Vec<String>,
 }
 
 impl MockStore {
     pub fn new() -> Self {
         Self {
             files: HashMap::new(),
+            symlinks: HashMap::new(),
+            dirs: Vec::new(),
         }
     }
 
@@ -29,8 +34,20 @@ impl MockStore {
         self.files.get(path).is_some()
     }
 
+    pub fn link_exists(&self, path: &str) -> bool {
+        self.symlinks.get(path).is_some()
+    }
+
+    pub fn dir_exists(&self, path: &str) -> bool {
+        self.dirs.contains(&path.to_owned())
+    }
+
     pub fn file_as_string(&self, path: &str) -> String {
         String::from_utf8_lossy(&self.files.get(path).unwrap().content).to_string()
+    }
+
+    pub fn symlinks_points_at(&self, path: &str) -> String {
+        self.symlinks.get(path).unwrap().clone()
     }
 
     pub fn is_file_executable(&self, path: &str) -> bool {
@@ -101,13 +118,31 @@ impl Store for MockStore {
         let path = path.to_owned();
         LocalFutureObj::new(Box::new(async move {
             info!("add file {} to mock store", path);
-            let file = File{
+            let file = File {
                 executable,
                 content: data.to_owned(),
             };
             self.files.insert(path, file);
             Ok(())
         }))
+    }
+
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            info!("add directory {} to mock store", path);
+            self.dirs.push(path);
+            Ok(())
+        }))
+    }
+
+    fn make_symlink<'a>(
+        &'a mut self,
+        source: &str,
+        target: &str,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        self.symlinks.insert(source(), target.clone());
+        LocalFutureObj::new(Box::new(async { Ok(()) }))
     }
 
     fn add_text_to_store<'a>(

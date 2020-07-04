@@ -1,3 +1,5 @@
+#![allow(unused_variables)]
+#![allow(dead_code)]
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
@@ -73,6 +75,10 @@ impl Store for MockStore {
         executable: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         unimplemented!("store: write_file")
+    }
+
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!("store: make_directory")
     }
 
     fn add_text_to_store<'a>(

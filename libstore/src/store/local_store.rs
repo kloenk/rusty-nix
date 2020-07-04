@@ -392,6 +392,10 @@ impl crate::Store for LocalStore {
         }))
     }
 
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!()
+    }
+
     /*fn write_regular_file<'a>(
         &'a mut self,
         path: &'a str,

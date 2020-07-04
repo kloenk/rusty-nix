@@ -358,6 +358,22 @@ pub trait Store {
         executable: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn make_symlink<'a>(
+        &'a mut self,
+        source: &str,
+        target: &str,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let source = source.to_owned();
+        let target = target.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            Err(StoreError::Unimplemented {
+                msg: format!("make_symlink: '{} -> {}'", source, target),
+            })
+        }))
+    }
+
     fn add_to_store<'a>(
         &'a mut self,
         //source,
