@@ -1,6 +1,4 @@
-use std::sync::{Arc, RwLock};
-
-use log::{debug, info, trace, warn};
+use log::*;
 
 // for async trait
 
@@ -158,8 +156,6 @@ impl ValidPathInfo {
         sig: &str,
         public_keys: &crate::crypto::PublicKeys,
     ) -> Result<bool, StoreError> {
-        let fingerprint = self.fingerprint()?;
-
         public_keys.verify(self.fingerprint()?.as_bytes(), sig)
     }
 

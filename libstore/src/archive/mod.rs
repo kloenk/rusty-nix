@@ -98,7 +98,6 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             store.make_symlink(&path, &target).await?;
                             State::None // state not needed here
                         }
-                        _ => unimplemented!(),
                     }
                 } else if s == "contents" {
                     match &state {

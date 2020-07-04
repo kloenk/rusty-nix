@@ -1,4 +1,5 @@
-use log::{debug, info, trace, warn};
+#[allow(unused_imports)]
+use log::*;
 
 use ring::signature::{UnparsedPublicKey, ED25519};
 

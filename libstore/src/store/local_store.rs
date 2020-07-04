@@ -5,10 +5,10 @@ use log::{debug, trace, warn};
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
-use tokio::io::AsyncWrite;
 
 use std::sync::{Arc, RwLock};
 
+#[allow(dead_code)]
 pub struct LocalStore {
     base_dir: String,
     params: std::collections::HashMap<String, super::Param>,

@@ -141,7 +141,7 @@ impl Store for MockStore {
         source: &str,
         target: &str,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        self.symlinks.insert(source(), target.clone());
+        self.symlinks.insert(source.to_string(), target.to_string());
         LocalFutureObj::new(Box::new(async { Ok(()) }))
     }
 
