@@ -53,6 +53,7 @@ impl ClientSettings {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum Data {
     String(String),
     USize(usize),
