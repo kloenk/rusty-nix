@@ -340,10 +340,11 @@ pub trait Store {
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
-    fn write_regular_file<'a>(
+    fn write_file<'a>(
         &'a mut self,
         path: &str,
-        data: &[u8],
+        data: &'a [u8],
+        executable: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn add_to_store<'a>(

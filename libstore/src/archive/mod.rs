@@ -75,13 +75,34 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             return Err(NarError::UnknownFileType { file: t });
                         }
                         Type::Regular => State::File(path.to_owned()),
-                        _ => unimplemented!()
-                    }
-                } else if s == "contents" {
-                    match state {
-                        State::File(v) => store.write_regular_file(v, self.read_os_string().await?).await?;
                         _ => unimplemented!(),
                     }
+                } else if s == "contents" {
+                    match &state {
+                        State::File(v) => {
+                            store
+                                .write_file(&v, &self.read_os_string().await?, false)
+                                .await?
+                        }
+                        State::Executable(v) => {
+                            store
+                                .write_file(&v, &self.read_os_string().await?, true)
+                                .await?
+                        }
+                        _ => return Err(NarError::InvalidState { state: state }),
+                    }
+                } else if s == "executable" {
+                    let s = self.read_string().await?;
+                    if s != "" {
+                        return Err(NarError::InvalidExecutableMarker {});
+                    }
+                    state = match state {
+                        State::File(v) => State::Executable(v),
+                        _ => return Err(NarError::InvalidState { state: state }),
+                    };
+                } else if s == "entry" {
+                    let mut name = String::new();
+                    unimplemented!()
                 }
             }
             Ok(())
@@ -175,10 +196,18 @@ impl std::convert::From<&str> for Type {
     }
 }
 
-pub enum State { // TODO: only store references for less memory footprint?
+#[derive(Debug)]
+pub enum State {
+    // TODO: only store references for less memory footprint?
     None,
     File(String),
     Executable(String),
     Directory(String),
     Symlink(String),
+}
+
+impl std::fmt::Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self) // TODO: write match cases
+    }
 }

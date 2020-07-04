@@ -371,10 +371,23 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    fn write_regular_file<'a>(&'a mut self, path: &str, data: &[u8]) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    fn write_file<'a>(
+        &'a mut self,
+        path: &str,
+        data: &'a [u8],
+        executable: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         let path = path.to_string();
         LocalFutureObj::new(Box::new(async move {
-            warn!("implement writefile for {}", path);
+            let mut file = tokio::fs::File::create(path).await?;
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = if executable { 0o555 } else { 0o444 };
+            let perms = std::fs::Permissions::from_mode(perms);
+            file.set_permissions(perms).await?;
+
+            use tokio::io::AsyncWriteExt;
+            file.write_all(data).await?;
             Ok(())
         }))
     }

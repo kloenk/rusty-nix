@@ -42,4 +42,5 @@ custom_error! {
         InvalidExecutableMarker{} = "executable marker has non-empty value",
         ReadError{source: std::io::Error} = "could not read nar: {source}",
         StoreError{source: StoreError} = "StoreError: {source}",
+        InvalidState{state: crate::archive::State } = "InvalidState: {state}", // TODO: add case info
 }
