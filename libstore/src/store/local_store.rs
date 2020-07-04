@@ -393,7 +393,11 @@ impl crate::Store for LocalStore {
     }
 
     fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        unimplemented!()
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            tokio::fs::create_dir_all(path).await?;
+            Ok(())
+        }))
     }
 
     /*fn write_regular_file<'a>(

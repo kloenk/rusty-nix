@@ -404,47 +404,34 @@ impl<'a> Connection<'a> {
 
     pub async fn parse_dump(
         &mut self,
-        _path: &str,
+        path: &str,
     ) -> Result<super::store::ValidPathInfo, StoreError> {
-        /*use super::store::ValidPathInfo;
-        // TODO: return sha256?
-        let version = self.read_string().await?;
-        if version != NARVERSIONMAGIC_1 {
-            return Err(StoreError::BadArchive {
-                msg: "input does not look like a Nix Archive".to_string(),
-            });
-        }
-        trace!("string: {}", version);
+        use super::store::ValidPathInfo;
 
-        let hasher = ring::digest::Context::new(&ring::digest::SHA256);
-        let mut hash = self.hasher.write().unwrap();
-        *hash = Some((hasher, 0));
-        drop(hash);
-
-        // TODO: get store from self.store
-        // TODO: makeTempDir
         let store_dir = self.store.get_store_dir().await?;
         let extract_file = format!("{}/.temp/{}", store_dir, path);
-        self.parse(&extract_file).await?; // TODO: file under /nix/store/<hash>-<name>/
 
-        let mut hash = self.hasher.write().unwrap();
-        let hash = hash.take().unwrap(); // TODO: can other move it?
-        let size = hash.1;
-        let hash = hash.0.finish();
-        let hash = hash.as_ref().to_vec();
+        let mut reader = self.reader.write().unwrap();
+        let mut parser =
+            crate::archive::NarParser::new(&extract_file, &mut *reader, &mut self.store);
+        let parser = parser.parse().await.unwrap();
+        drop(reader);
 
-        //let hash = super::store::Hash::SHA256(&hash);
-        let hash = super::store::Hash::from_sha256_vec(&hash)?;
-        let hash_compressed = hash.clone();
+        let hash_compressed = parser.hash.clone();
         let hash_compressed = hash_compressed.compress_hash(20)?;
-        let result = format!("{}/{}-{}", store_dir, hash_compressed, path).replace("//", "/");
-        std::fs::rename(extract_file, &result)?;
+        let result = format!(
+            "{}/{}-{}",
+            self.store.get_store_dir().await?,
+            hash_compressed,
+            path
+        )
+        .replace("//", "/"); // TODO: make cleaner
+        std::fs::rename(extract_file, &result)?; // TODO: will alsway have localStore?
 
-        let result = ValidPathInfo::now(&result, hash, size as u64)?;
+        let result = ValidPathInfo::now(&result, parser.hash, parser.len)?;
         let result = self.store.register_path(result).await?;
 
-        Ok(result)*/
-        unimplemented!()
+        Ok(result)
     }
 
     pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
