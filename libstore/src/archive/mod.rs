@@ -7,6 +7,8 @@ use std::boxed::Box;
 pub use crate::error::NarError;
 use crate::Store;
 
+pub use crate::store::Hash;
+
 use log::*;
 
 use std::io;
@@ -16,7 +18,7 @@ pub const NAR_VERSION_MAGIC_1: &'static str = "nix-archive-1";
 
 /// Returned as succesfully parsed nar archive
 pub struct NarResult {
-    //pub hash: Hash,
+    pub hash: Hash,
     pub len: u64,
 }
 
@@ -25,6 +27,8 @@ pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
 
     store: Mutex<&'a mut Box<dyn Store>>,
 
+    hasher: Mutex<Option<(ring::digest::Context, u64)>>,
+
     pub base_path: String,
 }
 
@@ -32,6 +36,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
     pub fn new(base_path: &str, reader: &'a mut T, store: &'a mut Box<dyn Store>) -> Self {
         Self {
             base_path: base_path.to_string(),
+            hasher: Mutex::new(Some((ring::digest::Context::new(&ring::digest::SHA256), 0))), // TODO: other hashing algs
             reader: Mutex::new(reader),
             store: Mutex::new(store),
         }
@@ -47,9 +52,14 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
 
         self.inner_parser(self.base_path.to_owned()).await.await?;
 
+        let (hasher, len) = self.hasher.lock().unwrap().take().unwrap();
+        let hash = hasher.finish();
+        let hash = Hash::from_sha256_vec(hash.as_ref())?;
+
         Ok(NarResult {
             // TODO: fix
-            len: 0,
+            len,
+            hash,
         })
     }
 
@@ -178,6 +188,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
 
         let mut reader = self.reader.lock().unwrap();
         reader.read_exact(&mut buf).await?;
+        self.hash(&buf);
 
         // update_hasher
 
@@ -207,6 +218,8 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
 
         drop(reader);
 
+        self.hash(&value);
+
         // update_hasher
         self.read_padding(len).await?;
 
@@ -218,7 +231,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
         Ok(String::from_utf8_lossy(&self.read_os_string().await?).to_string())
     }
 
-    async fn read_strings(&'a self) -> Result<Vec<String>, NarError> {
+    /*async fn read_strings(&'a self) -> Result<Vec<String>, NarError> {
         trace!("read strings");
         let len = self.read_int().await?; // borrow checker fails
 
@@ -228,7 +241,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
         }
 
         Ok(vec)
-    }
+    }*/
 
     async fn read_padding(&'a self, len: u64) -> Result<(), NarError> {
         trace!("read padding");
@@ -239,10 +252,22 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
 
             let mut reader = self.reader.lock().unwrap();
             reader.read_exact(&mut buf[..len]).await?;
+            self.hash(&buf[..len]);
             // TODO: check for non 0
         }
         trace!("end of read padding");
         Ok(())
+    }
+
+    fn hash(&'a self, data: &[u8]) {
+        let mut hasher = self.hasher.lock().unwrap();
+        if let Some((hasher, len)) = &mut *hasher {
+            hasher.update(data);
+            *len += data.len() as u64;
+        }
+        //if let Some((&mut hasher, &mut len)) = *self.hasher.lock().unwrap() {
+
+        //}
     }
 }
 
@@ -415,5 +440,11 @@ mod test {
 
         assert!(b.link_exists("/mock/dir/exe_symlink"));
         assert_eq!(b.symlinks_points_at("/mock/dir/exe_symlink"), "exe");
+
+        assert_eq!(ret.len, 712);
+        assert_eq!(
+            ret.hash.to_base32().unwrap(),
+            "KTDZMKFP5AQGNPGXF5NVF4I3L23V3IQLACSPGYMC44LSA23NNFTQ===="
+        );
     }
 }
