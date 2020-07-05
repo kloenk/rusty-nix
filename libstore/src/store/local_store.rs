@@ -1,5 +1,6 @@
 use super::ValidPathInfo;
 use crate::error::StoreError;
+use crate::unimplemented;
 use log::{debug, trace, warn};
 
 // for async trait
@@ -512,17 +513,26 @@ impl crate::Store for LocalStore {
 
                 //self.autoGC()
 
-                let mut file = tokio::fs::File::create(&dest_path).await?;
+                /*let mut file = tokio::fs::File::create(&dest_path).await?;
                 use tokio::io::AsyncWriteExt;
                 file.write_all(data).await?;
 
                 use std::os::unix::fs::PermissionsExt;
                 let perms = std::fs::Permissions::from_mode(0o444);
-                file.set_permissions(perms).await?;
+                file.set_permissions(perms).await?;*/
 
-                file.sync_all().await?; // TODO: put behind settings
+                /*file.sync_all().await?; // TODO: put behind settings*/
+                self.write_file(&dest_path, data, false).await?;
 
                 // dumpString(data)
+                let nar = crate::archive::dump_data(&data);
+                let hash = ring::digest::digest(&ring::digest::SHA256, &nar);
+                let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+                let mut info = ValidPathInfo::now(&dest_path, hash, nar.len() as u64)?;
+                // TODO: references, ca
+                let info = self.register_path(info).await?;
+                return Ok(info);
             }
 
             unimplemented!()

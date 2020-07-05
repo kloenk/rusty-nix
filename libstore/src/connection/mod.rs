@@ -18,6 +18,9 @@ pub const WORKER_MAGIC_1: u32 = 0x6e697863;
 pub const WORKER_MAGIC_2: u32 = 0x6478696f;
 pub const PROTOCOL_VERSION: u16 = 0x115;
 
+#[allow(unused_imports)]
+use crate::unimplemented;
+
 pub mod logger;
 //pub mod archive;
 

@@ -1,6 +1,12 @@
 use std::convert::From;
 use std::io;
 
+#[macro_export]
+macro_rules! unimplemented {
+    () => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("not implemnet in line {}", line!()) }));
+    ($($arg:tt)+) => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("{} in line: {}",std::format_args!($($arg)+), line!())}));
+}
+
 use custom_error::custom_error;
 
 custom_error! {
