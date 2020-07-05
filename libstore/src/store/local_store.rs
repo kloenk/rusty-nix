@@ -8,6 +8,7 @@ use std::boxed::Box;
 
 use std::sync::{Arc, RwLock};
 
+#[allow(dead_code)]
 pub struct LocalStore {
     base_dir: String,
     params: std::collections::HashMap<String, super::Param>,
@@ -369,6 +370,51 @@ impl crate::Store for LocalStore {
             Ok(())
         }))
     }
+
+    fn write_file<'a>(
+        &'a mut self,
+        path: &str,
+        data: &'a [u8],
+        executable: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_string();
+        LocalFutureObj::new(Box::new(async move {
+            let mut file = tokio::fs::File::create(path).await?;
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = if executable { 0o555 } else { 0o444 };
+            let perms = std::fs::Permissions::from_mode(perms);
+            file.set_permissions(perms).await?;
+
+            use tokio::io::AsyncWriteExt;
+            file.write_all(data).await?;
+            Ok(())
+        }))
+    }
+
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            tokio::fs::create_dir_all(path).await?;
+            Ok(())
+        }))
+    }
+
+    /*fn write_regular_file<'a>(
+        &'a mut self,
+        path: &'a str,
+        data: &[u8],
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new( async move {
+            let file = tokio::fs::File::create(&path).await?; // TODO: rm befor create?
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o444);
+            file.set_permissions(perms).await?;
+
+            Ok(())
+        }))
+    }*/
 
     fn add_to_store<'a>(
         &'a mut self,

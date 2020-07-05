@@ -1,17 +1,26 @@
-use crate::error::StoreError;
-
-use std::sync::{Arc, RwLock};
-
-use log::{debug, info, trace, warn};
+use log::*;
 
 // for async trait
-use futures::future::LocalFutureObj;
-use std::boxed::Box;
+
+/// These are exported, because there are needed for async traits
+pub use futures::future::LocalFutureObj;
+/// These are exported, because there are needed for async traits
+pub use std::boxed::Box;
+
+pub use crate::error::StoreError;
 
 use chrono::NaiveDateTime;
 
 pub mod local_store;
 pub mod protocol;
+
+/// This is a store backend wich does not save things onto db
+#[cfg(test)]
+pub mod mock_store;
+
+/// This is incuded to check that no field are forgotten to add
+#[cfg(test)]
+pub mod store_template;
 
 #[derive(Debug, Clone)]
 pub struct ValidPathInfo {
@@ -147,8 +156,6 @@ impl ValidPathInfo {
         sig: &str,
         public_keys: &crate::crypto::PublicKeys,
     ) -> Result<bool, StoreError> {
-        let fingerprint = self.fingerprint()?;
-
         public_keys.verify(self.fingerprint()?.as_bytes(), sig)
     }
 
@@ -340,6 +347,29 @@ pub trait Store {
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
+    fn write_file<'a>(
+        &'a mut self,
+        path: &str,
+        data: &'a [u8],
+        executable: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn make_symlink<'a>(
+        &'a mut self,
+        source: &str,
+        target: &str,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let source = source.to_owned();
+        let target = target.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            Err(StoreError::Unimplemented {
+                msg: format!("make_symlink: '{} -> {}'", source, target),
+            })
+        }))
+    }
+
     fn add_to_store<'a>(
         &'a mut self,
         //source,
@@ -435,6 +465,12 @@ pub trait Store {
     }
 
     //fn print_store_paths<'a>('a self, p: Vec<>)
+
+    // this is needed for testing
+    #[cfg(test)]
+    fn as_any(&self) -> Option<&dyn std::any::Any> {
+        None
+    }
 }
 
 pub async fn open_store(

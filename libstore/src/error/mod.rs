@@ -23,6 +23,7 @@ custom_error! {
         HashDecodePartialError { error: String } = "cannont decode {error}",
         InvalidFileIngestionMethode { methode: u8 } = "invalid FileIngestionMethode: {methode}",
         BadArchive{ msg: String } = "BadArchive: {msg}",
+        //BadArchive{ source: NarError } = "BadArchive: {source}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
@@ -30,4 +31,20 @@ custom_error! {
 custom_error! {
     pub ConnectionError
         Io{source: io::Error} = "IoError: {source}",
+}
+
+custom_error! {
+    pub NarError
+        NotAArchive{} = "input does not look like a Nix Archive",
+        MissingOpenTag{} = "expected an open tag",
+        MultipleTypeFieleds{} = "there are multiple type fieleds",
+        UnknownFileType{ file: String } = "Unknown file type: {file}",
+        InvalidExecutableMarker{} = "executable marker has non-empty value",
+        ReadError{source: std::io::Error} = "could not read nar: {source}",
+        StoreError{source: StoreError} = "StoreError: {source}",
+        InvalidFileName{name: String} = "NAR contains invalid file name: '{name}'",
+        NotSorted{} = "NAR archive is not sorted",
+        MissingName{} = "etry name is missing",
+        InvalidSymlinkMarker{ marker: String } = "invalid target marker for symlink: '{marker}'",
+        InvalidState{state: crate::archive::State } = "InvalidState: {state}", // TODO: add case info
 }

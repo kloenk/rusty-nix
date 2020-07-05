@@ -5,6 +5,8 @@ pub mod store;
 
 pub mod crypto;
 
+pub mod archive;
+
 pub use store::open_store;
 pub use store::Store;
 

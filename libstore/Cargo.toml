@@ -23,3 +23,7 @@ lazy_static = "*"
 data-encoding = "*"
 
 libutil = { path = "../libutil" }
+
+
+[dev-dependencies]
+env_logger = "*"

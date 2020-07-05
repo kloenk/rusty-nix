@@ -183,7 +183,7 @@ impl NixDaemon {
         let trusted = config.is_trusted_user(&user, &group);
 
         if !config.is_allowed_user(&user, &group) {
-            return Err(crate::error::CommandError::DisallowedUser { user: user });
+            return Err(crate::error::CommandError::DisallowedUser { user });
         }
         let store = config.store.to_string();
         drop(config);
@@ -231,6 +231,7 @@ impl NixDaemon {
         // TODO: start tunnelloger
         let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);
 
+        #[allow(clippy::single_match)] // TODO: add magic?
         match connection.run().await {
             // FIXME: error
             Err(e) => {

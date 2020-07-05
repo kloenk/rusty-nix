@@ -2,9 +2,11 @@ use std::sync::{Arc, RwLock};
 
 use byteorder::{ByteOrder, LittleEndian};
 
-use log::{debug, error, info, trace, warn};
+use log::*;
 
+#[allow(unused_imports)]
 use futures::future::LocalFutureObj;
+
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
@@ -51,6 +53,7 @@ impl ClientSettings {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 enum Data {
     String(String),
     USize(usize),
@@ -162,10 +165,11 @@ impl<'a> Connection<'a> {
         // TODO: check for client version >= 12
         let n = self.read_int().await?;
         trace!("{} extra options", n);
-        for i in 0..n {
+        for _i in 0..n {
             let name = self.read_string().await?;
             let value = self.read_string().await?;
             settings.overrides.insert(name, Data::String(value));
+            warn!("set options not yet fully implemented");
         }
 
         self.logger.start_work().await?;
@@ -335,6 +339,7 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+    #[allow(dead_code, unused_assignments, unused_variables)]
     async fn add_to_store(&mut self) -> EmptyResult {
         let base_name = self.read_string().await?;
         let fixed = self.read_int().await? != 0; // obsolete?
@@ -403,229 +408,36 @@ impl<'a> Connection<'a> {
         path: &str,
     ) -> Result<super::store::ValidPathInfo, StoreError> {
         use super::store::ValidPathInfo;
-        // TODO: return sha256?
-        let version = self.read_string().await?;
-        if version != NARVERSIONMAGIC_1 {
-            return Err(StoreError::BadArchive {
-                msg: "input does not look like a Nix Archive".to_string(),
-            });
-        }
-        trace!("string: {}", version);
 
-        let hasher = ring::digest::Context::new(&ring::digest::SHA256);
-        let mut hash = self.hasher.write().unwrap();
-        *hash = Some((hasher, 0));
-        drop(hash);
-
-        // TODO: get store from self.store
-        // TODO: makeTempDir
         let store_dir = self.store.get_store_dir().await?;
         let extract_file = format!("{}/.temp/{}", store_dir, path);
-        self.parse(&extract_file).await?; // TODO: file under /nix/store/<hash>-<name>/
 
-        let mut hash = self.hasher.write().unwrap();
-        let hash = hash.take().unwrap(); // TODO: can other move it?
-        let size = hash.1;
-        let hash = hash.0.finish();
-        let hash = hash.as_ref().to_vec();
+        if let Some(v) = std::path::Path::new(&extract_file).parent() {
+            // only create parent incase we are just a file
+            std::fs::create_dir_all(v)?;
+        }
 
-        //let hash = super::store::Hash::SHA256(&hash);
-        let hash = super::store::Hash::from_sha256_vec(&hash)?;
-        let hash_compressed = hash.clone();
+        let mut reader = self.reader.write().unwrap();
+        let mut parser =
+            crate::archive::NarParser::new(&extract_file, &mut *reader, &mut self.store);
+        let parser = parser.parse().await.unwrap();
+        drop(reader);
+
+        let hash_compressed = parser.hash.clone();
         let hash_compressed = hash_compressed.compress_hash(20)?;
-        let result = format!("{}/{}-{}", store_dir, hash_compressed, path).replace("//", "/");
-        std::fs::rename(extract_file, &result)?;
+        let result = format!(
+            "{}/{}-{}",
+            self.store.get_store_dir().await?,
+            hash_compressed,
+            path
+        )
+        .replace("//", "/"); // TODO: make cleaner
+        std::fs::rename(extract_file, &result)?; // TODO: will alsway have localStore?
 
-        let result = ValidPathInfo::now(&result, hash, size as u64)?;
+        let result = ValidPathInfo::now(&result, parser.hash, parser.len)?;
         let result = self.store.register_path(result).await?;
 
         Ok(result)
-    }
-
-    pub fn parse(&self, path: &str) -> LocalFutureObj<EmptyResult> {
-        warn!("running parse");
-        // TODO: path<AsRef<Path>
-        let path = path.to_owned();
-        LocalFutureObj::new(Box::new(async move {
-            let tag = self.read_string().await?;
-            if tag != "(" {
-                return Err(StoreError::BadArchive {
-                    msg: "expected open tag".to_string(),
-                });
-            }
-
-            let mut f_type = Type::Unknown;
-            let mut state = State::None;
-
-            loop {
-                let s = self.read_string().await?;
-
-                if s == ")" {
-                    break;
-                } else if s == "type" {
-                    let t = self.read_string().await?;
-                    if f_type != Type::Unknown {
-                        return Err(StoreError::BadArchive {
-                            msg: "multiple type fileds".to_string(),
-                        });
-                    }
-                    f_type = Type::from(t.as_str());
-
-                    state = match f_type {
-                        Type::Unknown => {
-                            return Err(StoreError::BadArchive {
-                                msg: format!("Unknown file type: {}", t),
-                            })
-                        }
-                        Type::Regular => self.create_regulare_file(&path).await?,
-                        Type::Symlink => {
-                            let target = self.read_string().await?;
-                            self.parse_create_symlink(&path, &target).await?
-                        }
-                        Type::Directory => {
-                            warn!("implement dir");
-                            // TODO: set permissions
-                            std::fs::create_dir_all(&path)?; // TODO: give into function for path magic?
-                            state
-                        }
-                        _ => {
-                            warn!("ipmlement type");
-                            panic!("unimplemented behavior");
-                            State::None
-                        }
-                    };
-
-                    trace!("got type {:?}", f_type);
-                //f_type = Type::Unknown;
-                } else if s == "contents" {
-                    self.parse_contents(&mut state).await?;
-                } else if s == "executable" {
-                    let s = self.read_string().await?;
-                    if s != "" {
-                        return Err(StoreError::BadArchive {
-                            msg: "executable marker has non-empty value".to_string(),
-                        });
-                    }
-                    self.parse_set_executable(&path, &mut state).await?;
-                } else if s == "entry" {
-                    // temp vars
-                    let mut name = String::new();
-                    let mut prev_name = String::new();
-
-                    let s = self.read_string().await?;
-                    if s != "(" {
-                        return Err(StoreError::BadArchive {
-                            msg: "expected open tag".to_string(),
-                        });
-                    }
-                    loop {
-                        // TODO: checkInterrupt()??
-
-                        let s = self.read_string().await?;
-                        if s == ")" {
-                            break;
-                        } else if s == "name" {
-                            name = self.read_string().await?;
-                            debug!("creating file {}", name);
-                            if name.len() == 0
-                                || name == "."
-                                || name == ".."
-                                || name.find('/') != None
-                                || name.find("\0") != None
-                            {
-                                return Err(StoreError::BadArchive {
-                                    msg: format!("NAR contains invalid file name '{}'", name),
-                                });
-                            }
-                            if name <= prev_name {
-                                return Err(StoreError::BadArchive {
-                                    msg: "NAR directory is not sorted".to_string(),
-                                });
-                            }
-                            prev_name = name.clone();
-                        // TODO: macos case hack
-                        } else if s == "node" {
-                            if name.len() == 0 {
-                                return Err(StoreError::BadArchive {
-                                    msg: "entry name is missign".to_string(),
-                                });
-                            }
-                            self.parse(&format!("{}/{}", path, name)).await?;
-                        }
-                    }
-                } else {
-                    let v = self.read_string().await.unwrap();
-                    trace!("foobar: {}", v);
-                }
-            }
-
-            Ok(())
-        }))
-    }
-
-    pub async fn parse_contents(&self, state: &mut State) -> EmptyResult {
-        /*let size = self.read_int().await?;
-
-
-        let mut reader = self.reader.write().unwrap();
-        let mut reader = reader.take(size);*/
-        // TODO: this is very ugly
-        info!("wrinting contend");
-        //let data = self.read_string().await?; // TODO: read_os_string()
-        let data = self.read_os_string().await?;
-        use std::os::unix::ffi::OsStrExt;
-        if let State::File(v) = state {
-            v.write_all(&data).await?;
-        } else {
-            return Err(StoreError::BadArchive {
-                msg: "not a file".to_string(),
-            });
-        }
-
-        Ok(())
-    }
-
-    // TODO: cfg for macos?
-    pub async fn parse_create_symlink(
-        &self,
-        path: &str,
-        target: &str,
-    ) -> Result<State, StoreError> {
-        std::os::unix::fs::symlink(path, target)?;
-        Ok(State::None) // TODO: magic?
-    }
-
-    pub async fn parse_set_executable(
-        &self,
-        path: &str,
-        state: &mut State,
-    ) -> Result<(), StoreError> {
-        if let State::File(v) = state {
-            trace!("set executable bit");
-            let mut perms = v.metadata().await?.permissions();
-            use std::os::unix::fs::PermissionsExt;
-            perms.set_mode(0o555);
-            v.set_permissions(perms).await?;
-        } else {
-            unimplemented!("non file executable bit");
-        }
-        Ok(()) // TODO: state magic?
-    }
-
-    pub async fn create_regulare_file(&self, path: &str) -> Result<State, StoreError> {
-        // TOOD: magic with path?
-        /*let file = tokio::fs::OpenOptions::new()
-        .create_new(true)
-        .open(path)
-        .await.unwrap();*/
-        let file = tokio::fs::File::create(path).await.unwrap();
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o444);
-        file.set_permissions(perms).await?;
-
-        trace!("creating file: {}", path);
-
-        Ok(State::File(file))
     }
 
     pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
@@ -715,8 +527,8 @@ impl<'a> Connection<'a> {
     async fn read_strings(&self) -> Result<Vec<String>, StoreError> {
         let len = self.read_int().await?;
 
-        let mut vec = Vec::new();
-        for v in 0..len {
+        let mut vec = Vec::with_capacity(len as usize);
+        for _v in 0..len {
             vec.push(self.read_string().await?);
         }
 
