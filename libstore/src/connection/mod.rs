@@ -412,6 +412,11 @@ impl<'a> Connection<'a> {
         let store_dir = self.store.get_store_dir().await?;
         let extract_file = format!("{}/.temp/{}", store_dir, path);
 
+        if let Some(v) = std::path::Path::new(&extract_file).parent() {
+            // only create parent incase we are just a file
+            std::fs::create_dir_all(v)?;
+        }
+
         let mut reader = self.reader.write().unwrap();
         let mut parser =
             crate::archive::NarParser::new(&extract_file, &mut *reader, &mut self.store);
