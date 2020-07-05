@@ -1,5 +1,6 @@
 use super::ValidPathInfo;
 use crate::error::StoreError;
+use crate::wrap_error;
 use log::{debug, trace, warn};
 
 // for async trait
@@ -52,11 +53,17 @@ impl LocalStore {
         let mut stat = std::mem::MaybeUninit::<libc::statvfs>::uninit();
         let store_dir = std::ffi::CString::new(self.get_store_dir().as_str()).unwrap();
         if unsafe { libc::statvfs(store_dir.as_ptr(), stat.as_mut_ptr()) } != 0 {
-            return Err(StoreError::SysError {
+            /*return Err(StoreError::SysError {
                 msg: format!(
                     "getting info about the nix store mount point: {}",
                     self.get_store_dir()
                 ),
+            });*/
+            wrap_error!(StoreError::SysError {
+                msg: format!(
+                    "getting info about the nix store mount point: '{}'",
+                    self.get_store_dir()
+                )
             });
         }
 

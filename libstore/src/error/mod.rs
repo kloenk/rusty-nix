@@ -1,6 +1,24 @@
 use std::convert::From;
 use std::io;
 
+#[macro_export]
+macro_rules! wrap_error {
+    () => {
+        return Err($crate::error::StoreError::Wrapped {
+            err: $crate::error::StoreError::Unimplemented {
+                msg: "".to_string(),
+            },
+            line: line!(),
+        });
+    };
+    ($err:expr) => {
+        return Err($crate::error::StoreError::Wrapped {
+            err: Box::new($err),
+            line: line!(),
+        });
+    };
+}
+
 use custom_error::custom_error;
 
 custom_error! {
@@ -26,6 +44,7 @@ custom_error! {
         //BadArchive{ source: NarError } = "BadArchive: {source}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
+        Wrapped{ err: Box<StoreError>, line: u32 } = "{err} on line {line}",
 }
 
 custom_error! {

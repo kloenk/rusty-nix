@@ -18,10 +18,10 @@ pub const WORKER_MAGIC_1: u32 = 0x6e697863;
 pub const WORKER_MAGIC_2: u32 = 0x6478696f;
 pub const PROTOCOL_VERSION: u16 = 0x115;
 
+use crate::wrap_error;
+
 pub mod logger;
 //pub mod archive;
-
-pub const NARVERSIONMAGIC_1: &str = "nix-archive-1";
 
 #[derive(Debug)]
 struct ClientSettings {
