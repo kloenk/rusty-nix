@@ -7,6 +7,10 @@ pub mod crypto;
 
 pub mod archive;
 
+pub mod build;
+
+pub mod gc;
+
 pub use store::open_store;
 pub use store::Store;
 

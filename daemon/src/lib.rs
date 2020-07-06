@@ -58,6 +58,7 @@ impl NixDaemon {
         let nix_config = libutil::config::NixConfig::parse_file(config_file)?;
         let mut store_config = libstore::CONFIG.write().unwrap();
         *store_config = nix_config;
+        drop(store_config);
         // TODO: merge with args
 
         let mut config = Self { stdio: false };

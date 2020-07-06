@@ -54,3 +54,12 @@ custom_error! {
         InvalidSymlinkMarker{ marker: String } = "invalid target marker for symlink: '{marker}'",
         InvalidState{state: crate::archive::State } = "InvalidState: {state}", // TODO: add case info
 }
+
+custom_error! {
+    pub BuildError
+        Io{source: std::io::Error} = "IO: {source}",
+        NoFreeUsers{} = "No free users could be found",
+        NoBuildUsers{} = "No build user group is set in config",
+        UserNotExisting{ user: String } = "the user '{user}' does not exist",
+        UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
+}

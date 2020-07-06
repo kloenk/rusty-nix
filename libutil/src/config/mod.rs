@@ -33,6 +33,9 @@ pub struct NixConfig {
     #[serde(default = "default_store")]
     pub store: String, // The default Nix store to use.
 
+    #[serde(default = "default_state_dir")]
+    pub nix_state_dir: String,
+
     #[serde(default = "default_socket_path")]
     pub nix_daemon_socket_file: String, // path to the nix daemon socket path
 
@@ -310,6 +313,10 @@ fn default_store() -> String {
     use std::env::var;
     //var("NIX_STORE_DIR").unwrap_or_else(|_| var("NIX_STORE").unwrap_or(String::from("auto")))
     var("NIX_REMOTE").unwrap_or_else(|_| String::from("auto"))
+}
+
+fn default_state_dir() -> String {
+    String::from("/nix/var/nix")
 }
 
 fn default_socket_path() -> String {
