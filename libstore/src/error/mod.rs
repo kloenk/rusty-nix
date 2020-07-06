@@ -3,8 +3,8 @@ use std::io;
 
 #[macro_export]
 macro_rules! unimplemented {
-    () => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("not implemnet in line {}", line!()) }));
-    ($($arg:tt)+) => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("{} in line: {}",std::format_args!($($arg)+), line!())}));
+    () => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("not implemnet in line {}:{}", file!(), line!()) }));
+    ($($arg:tt)+) => (return Err($crate::error::StoreError::Unimplemented{ msg: format!("{} in line: {}:{}",std::format_args!($($arg)+), file!(), line!())}));
 }
 
 use custom_error::custom_error;

@@ -142,6 +142,7 @@ impl<'a> Connection<'a> {
             WorkerOp::WopAddToStore => self.add_to_store().await,
             WorkerOp::WopEnsurePath => self.ensure_path().await,
             WorkerOp::WopAddTextToStore => self.add_text_to_store().await,
+            WorkerOp::WopBuildPaths => self.build_paths().await,
             _ => {
                 error!("not yet implemented");
                 Ok(())
@@ -394,6 +395,22 @@ impl<'a> Connection<'a> {
         Ok(())
     }
 
+    async fn build_paths(&mut self) -> EmptyResult {
+        let drvs = self.read_strings().await?;
+        info!("building pathes: \n{}", drvs.join("\n"));
+
+        let mode = self.read_int().await?;
+        trace!("using mode: {}", mode);
+
+        self.logger.start_work().await?;
+        warn!("build pathes");
+        self.logger.stop_work(logger::WORKDONE).await?;
+
+        self.write_u64(1).await?;
+
+        Ok(())
+    }
+
     async fn ensure_path(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
         trace!("ensure path {}", path);
@@ -414,6 +431,9 @@ impl<'a> Connection<'a> {
 
         let store_dir = self.store.get_store_dir().await?;
         let extract_file = format!("{}/.temp/{}", store_dir, path);
+        self.store
+            .delete_path(&std::path::PathBuf::from(&extract_file))
+            .await?;
 
         if let Some(v) = std::path::Path::new(&extract_file).parent() {
             // only create parent incase we are just a file
@@ -435,9 +455,17 @@ impl<'a> Connection<'a> {
             path
         )
         .replace("//", "/"); // TODO: make cleaner
+        let result = std::path::PathBuf::from(result);
+        //let result = result.canonicalize()?;
+
+        //std::fs::remove_dir_all(&result);
+        self.store
+            .delete_path(&std::path::PathBuf::from(&result))
+            .await?;
+
         std::fs::rename(extract_file, &result)?; // TODO: will alsway have localStore?
 
-        let result = ValidPathInfo::now(&result, parser.hash, parser.len)?;
+        let result = ValidPathInfo::now(&result.display().to_string(), parser.hash, parser.len)?;
         let result = self.store.register_path(result).await?;
 
         Ok(result)

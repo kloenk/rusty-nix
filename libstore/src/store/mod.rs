@@ -266,11 +266,13 @@ impl Hash {
 
     pub fn hash_string(s: &str) -> Result<Hash, StoreError> {
         // read hash type from s
+        trace!("reading hash string: '{}'", s);
         let ht: Vec<&str> = s.split(':').collect();
-        if ht.len() < 2 {
+        if ht.len() < 4 {
             unimplemented!("invalid hash string");
         }
-        let ht = ht[1];
+        let ht_pos = ht.len() - 4;
+        let ht = ht[ht_pos];
         match ht {
             "sha256" => Hash::from_sha256_vec(
                 ring::digest::digest(&ring::digest::SHA256, s.as_bytes()).as_ref(),
@@ -282,6 +284,7 @@ impl Hash {
 
 impl std::convert::From<&str> for Hash {
     fn from(v: &str) -> Self {
+        trace!("making hash from '{}'", v);
         let v: Vec<&str> = v.split(':').collect();
         match *v.get(0).unwrap_or(&"") {
             "sha256" => {

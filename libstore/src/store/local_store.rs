@@ -1,7 +1,7 @@
 use super::ValidPathInfo;
 use crate::error::StoreError;
 use crate::unimplemented;
-use log::{debug, trace, warn};
+use log::*;
 
 // for async trait
 use futures::future::LocalFutureObj;
@@ -93,11 +93,11 @@ impl LocalStore {
     }
 
     pub fn get_state_dir(&self) -> String {
-        format!("{}/var/nix/", self.base_dir)
+        format!("{}var/nix/", self.base_dir)
     }
 
     pub fn get_store_dir(&self) -> String {
-        format!("{}/store", self.base_dir)
+        format!("{}store", self.base_dir)
     }
 }
 
@@ -110,7 +110,7 @@ impl crate::Store for LocalStore {
 
     fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
         LocalFutureObj::new(Box::new(
-            async move { Ok(format!("{}/store/", self.base_dir)) },
+            async move { Ok(format!("{}store", self.base_dir)) },
         ))
     }
 
@@ -366,8 +366,23 @@ impl crate::Store for LocalStore {
         &'a mut self,
         path: &std::path::PathBuf,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.display().to_string();
         LocalFutureObj::new(Box::new(async move {
-            warn!("delete_path not yet implemented");
+            warn!("delete_path not yet implemented for : {}", &path);
+            //unimplemented!("delete path"); // TODO: make less ugly
+
+            #[allow(unused_must_use)]
+            std::fs::remove_dir_all(&path);
+
+            let sqlite = self.sqlite.write().unwrap();
+            sqlite.execute("DELETE FROM ValidPaths WHERE path = (?);", &[&path])?;
+            /*let mut stm = sqlite.prepare("DELETE FROM ValidPaths WHERE path = (?);")?;
+
+            let data = stm.query_map(&[&path], |row| {
+                warn!("foobar");
+                Ok(())
+            }).unwrap();*/
+
             Ok(())
         }))
     }
@@ -507,7 +522,7 @@ impl crate::Store for LocalStore {
             {
                 // TODO: make realpath?
 
-                //self.delete_path(dest_path);
+                self.delete_path(&std::path::PathBuf::from(&dest_path));
                 let rm = tokio::fs::remove_file(&dest_path).await; // magic like moving to /nix/store/.thrash
                 trace!("rm: {:?}", rm);
 
@@ -535,7 +550,8 @@ impl crate::Store for LocalStore {
                 return Ok(info);
             }
 
-            unimplemented!()
+            self.query_path_info(std::path::PathBuf::from(dest_path))
+                .await
         }))
     }
 
