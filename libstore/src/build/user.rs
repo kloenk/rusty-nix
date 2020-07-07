@@ -10,6 +10,8 @@ pub struct UserLock {
     uid: uid_t,
     gid: gid_t,
     supplementary_gids: Vec<gid_t>,
+
+    file: std::fs::File,
 }
 
 impl UserLock {
@@ -63,17 +65,26 @@ impl UserLock {
                     supplementary_gids: s_gids,
                     uid: user.uid.as_raw(),
                     user: user.name,
+                    file,
                 });
             }
         }
 
-        unimplemented!();
+        Err(BuildError::NoFreeUsers{})
+    }
 
-        /*Ok( Self {
-            gid: group.gr_gid,
-        })*/
+    pub fn get_uid(&self) -> uid_t {
+        self.uid
     }
 }
+
+impl PartialEq for UserLock {
+    fn eq(&self, other: &Self) -> bool {
+        return self.uid == other.uid;
+    }
+}
+
+impl Eq for UserLock {}
 
 #[cfg(target_os = "linux")]
 fn get_supplementary_gids(user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
@@ -90,4 +101,26 @@ fn get_supplementary_gids(user: &nix::unistd::User) -> std::io::Result<Vec<libc:
 #[cfg(not(target_os = "linux"))]
 fn get_supplementary_gids(_user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
     Vec::new()
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    #[ignore]
+    /// This tests needs a default nix setup with the default buildgroup (nixbld)
+    /// also this tests needs root permissions
+    fn lock_2_users() {
+        // Populate config
+        let mut config = libutil::config::NixConfig::default();
+        config.build_users_group = "nixbld".to_string(); // this test could fail on a non std nix setup
+        let mut cfg = crate::CONFIG.write().unwrap();
+        *cfg = config;
+        drop(cfg);
+
+        // this could fail if nix is building something big
+        let user_1 = super::UserLock::find_free_user().unwrap();
+        let user_2 = super::UserLock::find_free_user().unwrap();
+
+        assert_ne!(user_1, user_2);
+    }
 }

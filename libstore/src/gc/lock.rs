@@ -19,10 +19,22 @@ pub fn lock_file_fd(fd: RawFd, lock_type: LockType, wait: bool) -> std::io::Resu
 
     if unsafe { libc::flock(fd, lock_type) } != 0 {
         let errno = nix::errno::errno();
-        if wait && errno == libc::EWOULDBLOCK {
+        if !wait && errno == libc::EWOULDBLOCK {
             return Ok(false);
         }
         return Err(std::io::Error::from_raw_os_error(errno));
     }
     Ok(true)
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn write_block() {
+        let file = std::fs::File::create("/tmp/nix-test-lock-file").unwrap();
+        assert!(super::lock_file(&file, super::LockType::Write, true).unwrap());
+
+        let file = std::fs::File::create("/tmp/nix-test-lock-file").unwrap();
+        assert!(!super::lock_file(&file, super::LockType::Write, false).unwrap());
+    }
 }
