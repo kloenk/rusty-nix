@@ -95,6 +95,57 @@ impl UserLock {
     }
 }
 
+impl Drop for UserLock {
+    fn drop(&mut self) {
+        kill_user(self.uid).unwrap();
+    }
+}
+
+/// # Panics
+/// This function pannics if the uid is 0
+pub fn kill_user(uid: libc::uid_t) -> Result<(), BuildError> {
+    debug!("killing all processes running under uid {}", uid);
+
+    assert_ne!(uid, 0);
+
+    /* The system call kill(-1, sig) sends the signal `sig' to all
+    users to which the current process can send signals.  So we
+    fork a process, switch to uid, and send a mass kill. */
+
+    let killer: std::thread::JoinHandle<Result<(), BuildError>> = std::thread::spawn(move || {
+        if unsafe { libc::setuid(uid) } == -1 {
+            return Err(BuildError::SysError {
+                msg: "setting uid".to_string(),
+            });
+        }
+
+        loop {
+            if cfg!(target_os = "darwin") {
+                unimplemented!("syscall call?? https://github.com/NixOS/nix/blob/4d5169bdd507b12d8fe0a1cab89b5d81a43e6de5/src/libutil/util.cc#L923");
+            }
+
+            if unsafe { libc::kill(-1, libc::SIGKILL) } == 0 {
+                break;
+            };
+
+            let errno = nix::errno::errno();
+            if errno == libc::ESRCH {
+                break;
+            } // no more processes
+            if errno != libc::EINTR {
+                return Err(BuildError::SysError {
+                    msg: format!("cannot kill processes for uid '{}'", uid),
+                }); // TODO: should this be an IO error?
+            }
+        }
+
+        Ok(())
+    });
+
+    killer.join().unwrap()?;
+    Ok(())
+}
+
 impl PartialEq for UserLock {
     fn eq(&self, other: &Self) -> bool {
         return self.uid == other.uid;
@@ -105,6 +156,46 @@ impl Eq for UserLock {}
 
 #[cfg(test)]
 mod test {
+    #[test]
+    #[should_panic]
+    fn kill_user_root() {
+        super::kill_user(0).unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn kill_user() {
+        // setup config
+        let mut config = libutil::config::NixConfig::default();
+        config.build_users_group = "nixbld".to_string(); // this test could fail on a non std nix setup
+        let mut cfg = crate::CONFIG.write().unwrap();
+        *cfg = config;
+
+        drop(cfg);
+        let user = super::UserLock::find_free_user().unwrap();
+        let uid = user.get_uid();
+        let pid = std::thread::spawn(move || {
+            if unsafe { libc::setuid(uid) } != 0 {
+                panic!()
+            }
+
+            let process = std::process::Command::new("sleep")
+                .arg("20h")
+                .spawn()
+                .unwrap();
+            println!("The pid of 'sleep' is {}", process.id());
+            process.id()
+        })
+        .join()
+        .unwrap();
+
+        let cmdline_1 = std::fs::read_to_string(format!("/proc/{}/cmdline", pid)).unwrap();
+        drop(user);
+        let cmdline_2 =
+            std::fs::read_to_string(format!("/proc/{}/cmdline", pid)).unwrap_or("".to_string());
+        assert_ne!(cmdline_1, cmdline_2);
+    }
+
     #[test]
     #[ignore]
     /// This tests needs a default nix setup with the default buildgroup (nixbld)

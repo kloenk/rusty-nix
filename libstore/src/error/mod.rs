@@ -62,4 +62,5 @@ custom_error! {
         NoBuildUsers{} = "No build user group is set in config",
         UserNotExisting{ user: String } = "the user '{user}' does not exist",
         UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
+        SysError{ msg: String } = "SysError {msg}",
 }
