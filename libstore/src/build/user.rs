@@ -97,7 +97,9 @@ impl UserLock {
 
 impl Drop for UserLock {
     fn drop(&mut self) {
-        kill_user(self.uid).unwrap();
+        if let Err(e) = kill_user(self.uid) {
+            error!("Could not drop user lock: {}", e);
+        }
     }
 }
 
