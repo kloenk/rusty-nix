@@ -58,7 +58,7 @@ impl UserLock {
                     });
                 }
 
-                let s_gids = get_supplementary_gids(&user)?;
+                let s_gids = Self::get_supplementary_gids(&user)?;
 
                 return Ok(Self {
                     gid: group.gid.as_raw(),
@@ -70,7 +70,24 @@ impl UserLock {
             }
         }
 
-        Err(BuildError::NoFreeUsers{})
+        Err(BuildError::NoFreeUsers {})
+    }
+
+    #[cfg(target_os = "linux")]
+    fn get_supplementary_gids(user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
+        let user_name = std::ffi::CString::new(user.name.as_bytes()).unwrap();
+        let list: Vec<nix::unistd::Gid> =
+            nix::unistd::getgrouplist(&user_name, user.gid).map_err(|v| match v {
+                nix::Error::Sys(v) => std::io::Error::from_raw_os_error(v as i32),
+                _ => unimplemented!(),
+            })?;
+
+        Ok(list.iter().map(|v| v.as_raw()).collect())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn get_supplementary_gids(_user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
+        Vec::new()
     }
 
     pub fn get_uid(&self) -> uid_t {
@@ -85,23 +102,6 @@ impl PartialEq for UserLock {
 }
 
 impl Eq for UserLock {}
-
-#[cfg(target_os = "linux")]
-fn get_supplementary_gids(user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
-    let user_name = std::ffi::CString::new(user.name.as_bytes()).unwrap();
-    let list: Vec<nix::unistd::Gid> =
-        nix::unistd::getgrouplist(&user_name, user.gid).map_err(|v| match v {
-            nix::Error::Sys(v) => std::io::Error::from_raw_os_error(v as i32),
-            _ => unimplemented!(),
-        })?;
-
-    Ok(list.iter().map(|v| v.as_raw()).collect())
-}
-
-#[cfg(not(target_os = "linux"))]
-fn get_supplementary_gids(_user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
-    Vec::new()
-}
 
 #[cfg(test)]
 mod test {
