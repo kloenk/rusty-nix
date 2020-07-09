@@ -43,7 +43,7 @@
             propagatedBuildInputs = propBuildDeps;
 
             cargoSha256 =
-              "af3738dabeba35e07b71f0b6c96c551ef46618971763360fbad804def32528ea";
+              "sha256-kCuSUPQpjj2YpxLp1s0eUvSOEXGrizg+xWWKHkst1Ys=";
 
 #            postInstall = ''
 #              cargo doc --workspace --release --all-features --frozen --offline --target-dir $doc
