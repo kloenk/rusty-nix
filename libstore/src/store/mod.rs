@@ -18,10 +18,6 @@ pub mod protocol;
 #[cfg(test)]
 pub mod mock_store;
 
-/// This is incuded to check that no field are forgotten to add
-#[cfg(test)]
-pub mod store_template;
-
 #[derive(Debug, Clone)]
 pub struct ValidPathInfo {
     pub path: std::path::PathBuf,
@@ -323,89 +319,80 @@ impl std::fmt::Display for Hash {
     }
 }
 
-pub trait Store {
-    fn create_user<'a>(
-        &'a mut self,
-        username: String,
-        uid: u32,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
-
-    fn query_path_info<'a>(
-        &'a mut self,
-        path: std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
-
-    fn is_valid_path<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-    ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
-
-    fn register_path<'a>(
-        &'a mut self,
-        info: ValidPathInfo,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
-
-    fn delete_path<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
-
+pub trait WriteStore: ReadStore + Store {
     fn write_file<'a>(
-        &'a mut self,
-        path: &str,
+        &'a self,
+        path: &'a str,
         data: &'a [u8],
         executable: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
-    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
-
-    fn make_symlink<'a>(
-        &'a mut self,
-        source: &str,
-        target: &str,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let source = source.to_owned();
-        let target = target.to_owned();
-        LocalFutureObj::new(Box::new(async move {
-            Err(StoreError::Unimplemented {
-                msg: format!("make_symlink: '{} -> {}'", source, target),
-            })
-        }))
-    }
-
-    fn add_to_store<'a>(
-        &'a mut self,
-        //source,
-        path: ValidPathInfo,
-        repair: bool,
-        check_sigs: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
-
     fn add_text_to_store<'a>(
-        &'a mut self,
+        &'a self,
         suffix: &'a str,
         data: &'a [u8],
         refs: &'a Vec<String>,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
-    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
+    fn make_directory<'a>(&'a self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
-    fn make_type(&self, path_type: &str, refs: &Vec<String>, has_self_ref: bool) -> String {
-        let mut res = String::from(path_type);
-        for v in refs {
-            res.push(':');
-            res.push_str(v); // TODO: use self.printStorePath?
-        }
-        if has_self_ref {
-            res.push_str(":self");
-        }
+    fn make_symlink<'a>(
+        &'a self,
+        source: &'a str,
+        target: &'a str,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>; /*{
+                                                         let source = source.to_owned();
+                                                         let target = target.to_owned();
+                                                         LocalFutureObj::new(Box::new(async move {
+                                                             Err(StoreError::Unimplemented {
+                                                                 msg: format!("make_symlink: '{} -> {}'", source, target),
+                                                             })
+                                                         }))
+                                                     }*/
 
-        res
-    }
+    fn delete_path<'a>(
+        &'a self,
+        path: &std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn register_path<'a>(
+        &'a self,
+        info: ValidPathInfo,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
+
+    fn add_temp_root<'a>(&'a self, path: &'a str) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn add_to_store<'a>(
+        &'a self,
+        //source,
+        path: ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn create_user<'a>(
+        &'a self,
+        username: String,
+        uid: u32,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
+    fn box_clone_write(&self) -> Box<dyn WriteStore>;
+}
+
+pub trait ReadStore: Store {
+    fn query_path_info<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
+
+    fn is_valid_path<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
 
     fn make_text_path<'a>(
-        &'a mut self,
+        &'a self,
         suffix: &'a str,
         hash: &'a Hash,
         refs: &'a Vec<String>,
@@ -421,8 +408,21 @@ pub trait Store {
         }))
     }
 
+    fn make_type(&self, path_type: &str, refs: &Vec<String>, has_self_ref: bool) -> String {
+        let mut res = String::from(path_type);
+        for v in refs {
+            res.push(':');
+            res.push_str(v); // TODO: use self.printStorePath?
+        }
+        if has_self_ref {
+            res.push_str(":self");
+        }
+
+        res
+    }
+
     fn make_store_path<'a>(
-        &'a mut self,
+        &'a self,
         file_type: &'a str,
         hash: &'a Hash,
         name: &'a str,
@@ -458,28 +458,28 @@ pub trait Store {
         }))
     }
 
-    fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
-
-    fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>>;
-
     fn print_store_path<'a>(&'a self, p: &'a std::path::Path) -> Result<String, StoreError> {
         // TODO: C++ adds `storeDir + "/"` infront??
         Ok(p.display().to_string())
     }
 
-    //fn print_store_paths<'a>('a self, p: Vec<>)
+    fn box_clone_read(&self) -> Box<dyn ReadStore>;
+}
 
-    // this is needed for testing
-    #[cfg(test)]
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        None
-    }
+/// This is the main store Trait, needed by every kind of store.
+/// Every Store has to implement Clone. If a store has some data which in mutable inside it has to handle it itself.
+pub trait Store {
+    fn get_store_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>>;
+
+    fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>>;
+
+    fn box_clone(&self) -> Box<dyn Store>;
 }
 
 pub async fn open_store(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
-) -> Result<Box<dyn Store>, StoreError> {
+) -> Result<Box<dyn WriteStore>, StoreError> {
     if store_uri == "auto" {
         let store = local_store::LocalStore::open_store("/nix/", params).await?;
         return Ok(Box::new(store));
@@ -523,7 +523,7 @@ impl std::convert::TryFrom<u64> for FileIngestionMethod {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Param {
     String(String),
     Bool(bool),
