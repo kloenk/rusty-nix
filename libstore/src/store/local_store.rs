@@ -7,9 +7,12 @@ use log::*;
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
+use super::{ReadStore, Store, WriteStore};
+
 use std::sync::{Arc, RwLock};
 
 #[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct LocalStore {
     base_dir: String,
     params: std::collections::HashMap<String, super::Param>,
@@ -88,7 +91,7 @@ impl LocalStore {
     }
 
     #[cfg(not(target_os = "linux"))]
-    async fn make_store_writable<'a>(&'a mut self) -> Result<(), StoreError> {
+    async fn make_store_writable<'a>(&'a self) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -101,95 +104,200 @@ impl LocalStore {
     }
 }
 
-impl crate::Store for LocalStore {
-    fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+impl WriteStore for LocalStore {
+    fn write_file<'a>(
+        &'a self,
+        path: &'a str,
+        data: &'a [u8],
+        executable: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            Ok(format!("{}/var/nix/", self.base_dir))
+            let mut file = tokio::fs::File::create(path).await?;
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = if executable { 0o555 } else { 0o444 };
+            let perms = std::fs::Permissions::from_mode(perms);
+            file.set_permissions(perms).await?;
+
+            use tokio::io::AsyncWriteExt;
+            file.write_all(data).await?;
+            Ok(())
         }))
     }
 
-    fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(
-            async move { Ok(format!("{}store", self.base_dir)) },
-        ))
+    fn make_directory<'a>(&'a self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            tokio::fs::create_dir_all(path).await?;
+            Ok(())
+        }))
     }
 
-    fn create_user<'a>(
-        &'a mut self,
-        username: String,
-        uid: u32,
+    fn make_symlink<'a>(
+        &'a self,
+        source: &'a str,
+        target: &'a str,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        //let state_dir = self.get_state_dir();
         LocalFutureObj::new(Box::new(async move {
-            let state_dir = self.get_state_dir().await?;
-            let dirs = vec![
-                format!("{}/profiles/per-user/{}", &state_dir, username),
-                format!("{}/gcroots/per-user/{}", &state_dir, username),
-            ];
+            unimplemented!();
+        }))
+    }
 
-            for dir in dirs {
-                std::fs::create_dir_all(&dir)?;
+    fn add_text_to_store<'a>(
+        &'a self,
+        suffix: &'a str,
+        data: &'a [u8],
+        refs: &'a Vec<String>,
+        repair: bool,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let hash = ring::digest::digest(&ring::digest::SHA256, data);
+            let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+            let dest_path = self.make_text_path(suffix, &hash, refs).await?;
+            trace!("will write texte to {}", dest_path);
+
+            self.add_temp_root(&dest_path).await?;
+
+            if repair
+                || !self
+                    .is_valid_path(&std::path::Path::new(&dest_path))
+                    .await?
+            {
+                // TODO: make realpath?
+
+                self.delete_path(&std::path::PathBuf::from(&dest_path));
+                let rm = tokio::fs::remove_file(&dest_path).await; // magic like moving to /nix/store/.thrash
+                trace!("rm: {:?}", rm);
+
+                //self.autoGC()
+
+                /*let mut file = tokio::fs::File::create(&dest_path).await?;
+                use tokio::io::AsyncWriteExt;
+                file.write_all(data).await?;
+
                 use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o755);
-                std::fs::set_permissions(&dir, perms)?;
-                // TODO: chown
-                let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
-                let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
-                if chown != 0 {
-                    return Err(StoreError::OsError {
-                        call: String::from("chown"),
-                        ret: chown,
-                    });
-                }
+                let perms = std::fs::Permissions::from_mode(0o444);
+                file.set_permissions(perms).await?;*/
+
+                /*file.sync_all().await?; // TODO: put behind settings*/
+                self.write_file(&dest_path, data, false).await?;
+
+                // dumpString(data)
+                let nar = crate::archive::dump_data(&data);
+                let hash = ring::digest::digest(&ring::digest::SHA256, &nar);
+                let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+                let mut info = ValidPathInfo::now(&dest_path, hash, nar.len() as u64)?;
+                // TODO: references, ca
+                let info = self.register_path(info).await?;
+                return Ok(info);
             }
+            self.query_path_info(&dest_path).await
+        }))
+    }
+
+    fn add_to_store<'a>(
+        &'a self,
+        path: super::ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if let super::Hash::None = path.nar_hash {
+                return Err(StoreError::MissingHash {
+                    path: path.path.display().to_string(),
+                });
+            }
+            // TODO: return err if sig is missing
+
+            self.add_temp_root(&path.path.to_str().unwrap()).await?;
+
+            if repair || !self.is_valid_path(&path.path).await? {
+                self.delete_path(&path.path);
+
+                /*if path.ca.is_some() {
+                    let ca = path.ca.unwrap();
+                    if !ca.starts_with("text:") && path.references.len() == 0 || path.references.len() == 0
+                }*/
+
+                //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
+                // requireFeature("ca-references")
+
+                //                self.registerValidPath(path).await?;
+
+                /* std::unique_ptr<AbstractHashSink> hashSink;
+                if (info.ca == "" || !info.references.count(info.path))
+                    hashSink = std::make_unique<HashSink>(htSHA256);
+                else
+                    hashSink = std::make_unique<HashModuloSink>(htSHA256, std::string(info.path.hashPart()));
+
+                LambdaSource wrapperSource([&](unsigned char * data, size_t len) -> size_t {
+                    size_t n = source.read(data, len);
+                    (*hashSink)(data, n);
+                    return n;
+                });
+
+                restorePath(realPath, wrapperSource);
+
+                auto hashResult = hashSink->finish();
+
+                if (hashResult.first != info.narHash)
+                    throw Error("hash mismatch importing path '%s';\n  wanted: %s\n  got:    %s",
+                        printStorePath(info.path), info.narHash.to_string(Base32, true), hashResult.first.to_string(Base32, true));
+
+                if (hashResult.second != info.narSize)
+                    throw Error("size mismatch importing path '%s';\n  wanted: %s\n  got:   %s",
+                        printStorePath(info.path), info.narSize, hashResult.second);
+
+                autoGC();
+
+                canonicalisePathMetaData(realPath, -1);
+
+                optimisePath(realPath); // FIXME: combine with hashPath()
+
+                registerValidPath(info); */
+            }
+
+            // outputLock.setDeletion
+
+            unimplemented!()
+        }))
+    }
+
+    fn delete_path<'a>(
+        &'a self,
+        path: &std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.display().to_string();
+        LocalFutureObj::new(Box::new(async move {
+            warn!("delete_path not yet implemented for : {}", &path);
+            //unimplemented!("delete path"); // TODO: make less ugly
+
+            #[allow(unused_must_use)]
+            std::fs::remove_dir_all(&path);
+
+            let sqlite = self.sqlite.write().unwrap();
+            sqlite.execute("DELETE FROM ValidPaths WHERE path = (?);", &[&path])?;
+            /*let mut stm = sqlite.prepare("DELETE FROM ValidPaths WHERE path = (?);")?;
+
+            let data = stm.query_map(&[&path], |row| {
+                warn!("foobar");
+                Ok(())
+            }).unwrap();*/
 
             Ok(())
         }))
     }
 
-    fn is_valid_path<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            if path.to_str().unwrap() == "" {
-                return Err(StoreError::NotInStore {
-                    path: path.to_string_lossy().to_string(),
-                });
-            }
-
-            let path = path.canonicalize();
-            if let Err(v) = &path {
-                if v.kind() == std::io::ErrorKind::NotFound {
-                    trace!("cannot canon path");
-                    return Ok(false);
-                }
-            }
-            let path = path?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
-                return Err(StoreError::NotInStore {
-                    path: path.to_string_lossy().to_string(),
-                });
-            }
-            let sqlite = self.sqlite.write().unwrap();
-            let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
-
-            let data = stm
-                .query_row(&[&path.to_str()], |row| Ok(true))
-                .unwrap_or(false);
-
-            Ok(data)
-        }))
-    }
-
     fn register_path<'a>(
-        &'a mut self,
+        &'a self,
         info: ValidPathInfo,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             trace!("will register path {:?}", info);
             let path = info.path.canonicalize()?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
                 return Err(StoreError::NotInStore {
                     path: path.to_string_lossy().to_string(),
                 });
@@ -264,18 +372,64 @@ impl crate::Store for LocalStore {
         }))
     }
 
+    fn add_temp_root<'a>(&'a self, path: &'a str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            warn!("add temp root not yet implemented for '{}'", path);
+            Ok(())
+        }))
+    }
+
+    fn create_user<'a>(
+        &'a self,
+        username: String,
+        uid: u32,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        //let state_dir = self.get_state_dir();
+        LocalFutureObj::new(Box::new(async move {
+            let state_dir = self.get_state_dir();
+            let dirs = vec![
+                format!("{}/profiles/per-user/{}", &state_dir, username),
+                format!("{}/gcroots/per-user/{}", &state_dir, username),
+            ];
+
+            for dir in dirs {
+                std::fs::create_dir_all(&dir)?;
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o755);
+                std::fs::set_permissions(&dir, perms)?;
+                // TODO: chown
+                let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
+                let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
+                if chown != 0 {
+                    return Err(StoreError::OsError {
+                        call: String::from("chown"),
+                        ret: chown,
+                    });
+                }
+            }
+
+            Ok(())
+        }))
+    }
+
+    fn box_clone_write(&self) -> Box<dyn WriteStore> {
+        Box::new(self.clone())
+    }
+}
+
+impl ReadStore for LocalStore {
     fn query_path_info<'a>(
-        &'a mut self,
-        path: std::path::PathBuf,
+        &'a self,
+        path: &'a str,
     ) -> LocalFutureObj<'a, Result<crate::store::ValidPathInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            if path.to_str().unwrap() == "" {
+            if path == "" {
                 return Err(StoreError::NotInStore {
-                    path: path.display().to_string(),
+                    path: path.to_string(),
                 });
             }
-            let path = path.canonicalize()?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+            let path = std::path::Path::new(path).canonicalize()?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
                 return Err(StoreError::NotInStore {
                     path: path.display().to_string(),
                 });
@@ -355,214 +509,62 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    fn is_valid_path<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            warn!("add_temp_root not yet implemented for LocalStore");
-            Ok(())
-        }))
-    }
+            if path.to_str().unwrap() == "" {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
 
-    fn delete_path<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.display().to_string();
-        LocalFutureObj::new(Box::new(async move {
-            warn!("delete_path not yet implemented for : {}", &path);
-            //unimplemented!("delete path"); // TODO: make less ugly
-
-            #[allow(unused_must_use)]
-            std::fs::remove_dir_all(&path);
-
+            let path = path.canonicalize();
+            if let Err(v) = &path {
+                if v.kind() == std::io::ErrorKind::NotFound {
+                    trace!("cannot canon path");
+                    return Ok(false);
+                }
+            }
+            let path = path?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }
             let sqlite = self.sqlite.write().unwrap();
-            sqlite.execute("DELETE FROM ValidPaths WHERE path = (?);", &[&path])?;
-            /*let mut stm = sqlite.prepare("DELETE FROM ValidPaths WHERE path = (?);")?;
+            let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
-            let data = stm.query_map(&[&path], |row| {
-                warn!("foobar");
-                Ok(())
-            }).unwrap();*/
+            let data = stm
+                .query_row(&[&path.to_str()], |row| Ok(true))
+                .unwrap_or(false);
 
-            Ok(())
+            Ok(data)
         }))
     }
 
-    fn write_file<'a>(
-        &'a mut self,
-        path: &str,
-        data: &'a [u8],
-        executable: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_string();
+    fn box_clone_read(&self) -> Box<dyn ReadStore> {
+        Box::new(self.clone())
+    }
+}
+
+impl Store for LocalStore {
+    fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            let mut file = tokio::fs::File::create(path).await?;
-
-            use std::os::unix::fs::PermissionsExt;
-            let perms = if executable { 0o555 } else { 0o444 };
-            let perms = std::fs::Permissions::from_mode(perms);
-            file.set_permissions(perms).await?;
-
-            use tokio::io::AsyncWriteExt;
-            file.write_all(data).await?;
-            Ok(())
+            Ok(format!("{}/var/nix/", self.base_dir))
         }))
     }
 
-    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_owned();
-        LocalFutureObj::new(Box::new(async move {
-            tokio::fs::create_dir_all(path).await?;
-            Ok(())
-        }))
+    fn get_store_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        LocalFutureObj::new(Box::new(
+            async move { Ok(format!("{}store", self.base_dir)) },
+        ))
     }
 
-    /*fn write_regular_file<'a>(
-        &'a mut self,
-        path: &'a str,
-        data: &[u8],
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new( async move {
-            let file = tokio::fs::File::create(&path).await?; // TODO: rm befor create?
-
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o444);
-            file.set_permissions(perms).await?;
-
-            Ok(())
-        }))
-    }*/
-
-    fn add_to_store<'a>(
-        &'a mut self,
-        path: super::ValidPathInfo,
-        repair: bool,
-        check_sigs: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            if let super::Hash::None = path.nar_hash {
-                return Err(StoreError::MissingHash {
-                    path: path.path.display().to_string(),
-                });
-            }
-            // TODO: return err if sig is missing
-
-            self.add_temp_root(&path.path.to_str().unwrap()).await?;
-
-            if repair || !self.is_valid_path(&path.path).await? {
-                self.delete_path(&path.path);
-
-                /*if path.ca.is_some() {
-                    let ca = path.ca.unwrap();
-                    if !ca.starts_with("text:") && path.references.len() == 0 || path.references.len() == 0
-                }*/
-
-                //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
-                // requireFeature("ca-references")
-
-                //                self.registerValidPath(path).await?;
-
-                /* std::unique_ptr<AbstractHashSink> hashSink;
-                if (info.ca == "" || !info.references.count(info.path))
-                    hashSink = std::make_unique<HashSink>(htSHA256);
-                else
-                    hashSink = std::make_unique<HashModuloSink>(htSHA256, std::string(info.path.hashPart()));
-
-                LambdaSource wrapperSource([&](unsigned char * data, size_t len) -> size_t {
-                    size_t n = source.read(data, len);
-                    (*hashSink)(data, n);
-                    return n;
-                });
-
-                restorePath(realPath, wrapperSource);
-
-                auto hashResult = hashSink->finish();
-
-                if (hashResult.first != info.narHash)
-                    throw Error("hash mismatch importing path '%s';\n  wanted: %s\n  got:    %s",
-                        printStorePath(info.path), info.narHash.to_string(Base32, true), hashResult.first.to_string(Base32, true));
-
-                if (hashResult.second != info.narSize)
-                    throw Error("size mismatch importing path '%s';\n  wanted: %s\n  got:   %s",
-                        printStorePath(info.path), info.narSize, hashResult.second);
-
-                autoGC();
-
-                canonicalisePathMetaData(realPath, -1);
-
-                optimisePath(realPath); // FIXME: combine with hashPath()
-
-                registerValidPath(info); */
-            }
-
-            // outputLock.setDeletion
-
-            unimplemented!()
-        }))
+    fn box_clone(&self) -> Box<dyn Store> {
+        Box::new(self.clone())
     }
-    fn add_text_to_store<'a>(
-        &'a mut self,
-        suffix: &'a str,
-        data: &'a [u8],
-        refs: &'a Vec<String>,
-        repair: bool,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            let hash = ring::digest::digest(&ring::digest::SHA256, data);
-            let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
-
-            let dest_path = self.make_text_path(suffix, &hash, refs).await?;
-            trace!("will write texte to {}", dest_path);
-
-            self.add_temp_root(&dest_path).await?;
-
-            if repair
-                || !self
-                    .is_valid_path(&std::path::Path::new(&dest_path))
-                    .await?
-            {
-                // TODO: make realpath?
-
-                self.delete_path(&std::path::PathBuf::from(&dest_path));
-                let rm = tokio::fs::remove_file(&dest_path).await; // magic like moving to /nix/store/.thrash
-                trace!("rm: {:?}", rm);
-
-                //self.autoGC()
-
-                /*let mut file = tokio::fs::File::create(&dest_path).await?;
-                use tokio::io::AsyncWriteExt;
-                file.write_all(data).await?;
-
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o444);
-                file.set_permissions(perms).await?;*/
-
-                /*file.sync_all().await?; // TODO: put behind settings*/
-                self.write_file(&dest_path, data, false).await?;
-
-                // dumpString(data)
-                let nar = crate::archive::dump_data(&data);
-                let hash = ring::digest::digest(&ring::digest::SHA256, &nar);
-                let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
-
-                let mut info = ValidPathInfo::now(&dest_path, hash, nar.len() as u64)?;
-                // TODO: references, ca
-                let info = self.register_path(info).await?;
-                return Ok(info);
-            }
-
-            self.query_path_info(std::path::PathBuf::from(dest_path))
-                .await
-        }))
-    }
-
-    /*fn make_text_path<'a>(
-        &'a mut self,
-        suffix: &'a str,
-        hash: &'a super::Hash,
-        refs: &'a Vec<String>,
-    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(async move { unimplemented!() }))
-    }*/
 }
 
 // FIXME

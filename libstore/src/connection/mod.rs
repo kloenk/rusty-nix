@@ -75,7 +75,7 @@ pub struct Connection<'a> {
     uid: u32,
     u_name: String,
 
-    store: Box<dyn crate::Store>,
+    store: Box<dyn crate::store::WriteStore>,
 }
 
 impl<'a> Connection<'a> {
@@ -83,7 +83,7 @@ impl<'a> Connection<'a> {
         trusted: bool,
         client_version: u16,
         stream: &'a mut UnixStream,
-        store: Box<dyn crate::Store>,
+        store: Box<dyn crate::store::WriteStore>,
         uid: u32,
         u_name: String,
     ) -> Self {
@@ -186,10 +186,9 @@ impl<'a> Connection<'a> {
 
     async fn query_path_info(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
-        let path = std::path::PathBuf::from(&path);
-        debug!("queriying path info for {}", path.display());
+        debug!("queriying path info for {}", path);
         self.logger.start_work().await?;
-        let info = self.store.query_path_info(path).await;
+        let info = self.store.query_path_info(&path).await;
         self.logger.stop_work(logger::WORKDONE).await?;
 
         match info {
@@ -441,8 +440,11 @@ impl<'a> Connection<'a> {
         }
 
         let mut reader = self.reader.write().unwrap();
-        let mut parser =
-            crate::archive::NarParser::new(&extract_file, &mut *reader, &mut self.store);
+        let parser = crate::archive::NarParser::new(
+            &extract_file,
+            &mut *reader,
+            self.store.box_clone_write(),
+        );
         let parser = parser.parse().await.unwrap();
         drop(reader);
 

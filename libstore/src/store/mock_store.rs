@@ -4,162 +4,185 @@
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
-use super::{Store, StoreError, ValidPathInfo};
+use std::sync::{Arc, Mutex};
+
+use super::{ReadStore, Store, StoreError, ValidPathInfo, WriteStore};
 
 use std::collections::HashMap;
 
 use log::*;
 
+#[derive(Debug)]
 pub struct File {
     pub content: Vec<u8>,
     pub executable: bool,
 }
 
+#[derive(Clone, Debug)]
 pub struct MockStore {
-    files: HashMap<String, File>,
-    symlinks: HashMap<String, String>,
-    dirs: Vec<String>,
+    files: Arc<Mutex<HashMap<String, File>>>,
+    symlinks: Arc<Mutex<HashMap<String, String>>>,
+    dirs: Arc<Mutex<Vec<String>>>,
 }
 
 impl MockStore {
     pub fn new() -> Self {
         Self {
-            files: HashMap::new(),
-            symlinks: HashMap::new(),
-            dirs: Vec::new(),
+            files: Arc::new(Mutex::new(HashMap::new())),
+            symlinks: Arc::new(Mutex::new(HashMap::new())),
+            dirs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
     pub fn file_exists(&self, path: &str) -> bool {
-        self.files.get(path).is_some()
+        let files = self.files.lock().unwrap();
+        files.get(path).is_some()
     }
 
     pub fn link_exists(&self, path: &str) -> bool {
-        self.symlinks.get(path).is_some()
+        let symlinks = self.symlinks.lock().unwrap();
+        symlinks.get(path).is_some()
     }
 
     pub fn dir_exists(&self, path: &str) -> bool {
-        self.dirs.contains(&path.to_owned())
+        let dirs = self.dirs.lock().unwrap();
+        dirs.contains(&path.to_owned())
     }
 
     pub fn file_as_string(&self, path: &str) -> String {
-        String::from_utf8_lossy(&self.files.get(path).unwrap().content).to_string()
+        let files = self.files.lock().unwrap();
+        String::from_utf8_lossy(&files.get(path).unwrap().content).to_string()
     }
 
     pub fn symlinks_points_at(&self, path: &str) -> String {
-        self.symlinks.get(path).unwrap().clone()
+        let symlinks = self.symlinks.lock().unwrap();
+        symlinks.get(path).unwrap().clone()
     }
 
     pub fn is_file_executable(&self, path: &str) -> bool {
-        self.files.get(path).unwrap().executable
+        let files = self.files.lock().unwrap();
+        files.get(path).unwrap().executable
     }
 }
 
-impl Store for MockStore {
-    fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(async move { Ok("/nix/store".to_string()) }))
-    }
-
-    fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        unimplemented!("store: get_state_dir")
-    }
-
-    fn create_user<'a>(
-        &'a mut self,
-        username: String,
-        uid: u32,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        unimplemented!("store: create_user")
-    }
-
-    fn query_path_info<'a>(
-        &'a mut self,
-        path: std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        unimplemented!("store: query_path_info")
-    }
-
-    fn is_valid_path<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
-        unimplemented!("store: is_valid_path")
-    }
-
-    fn register_path<'a>(
-        &'a mut self,
-        info: ValidPathInfo,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        unimplemented!("store: register_path")
-    }
-
-    fn delete_path<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        unimplemented!("store: delete_path")
-    }
-
-    fn add_to_store<'a>(
-        &'a mut self,
-        path: ValidPathInfo,
-        repair: bool,
-        check_sigs: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        unimplemented!("store: add_to_store")
-    }
-
+impl WriteStore for MockStore {
     fn write_file<'a>(
-        &'a mut self,
-        path: &str,
+        &'a self,
+        path: &'a str,
         data: &'a [u8],
         executable: bool,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_owned();
         LocalFutureObj::new(Box::new(async move {
             info!("add file {} to mock store", path);
             let file = File {
                 executable,
                 content: data.to_owned(),
             };
-            self.files.insert(path, file);
-            Ok(())
-        }))
-    }
-
-    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_owned();
-        LocalFutureObj::new(Box::new(async move {
-            info!("add directory {} to mock store", path);
-            self.dirs.push(path);
+            let mut files = self.files.lock().unwrap();
+            files.insert(path.to_string(), file);
             Ok(())
         }))
     }
 
     fn make_symlink<'a>(
-        &'a mut self,
+        &'a self,
         source: &str,
         target: &str,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        self.symlinks.insert(source.to_string(), target.to_string());
+        let mut symlinks = self.symlinks.lock().unwrap();
+        symlinks.insert(source.to_string(), target.to_string());
         LocalFutureObj::new(Box::new(async { Ok(()) }))
+    }
+    fn make_directory<'a>(&'a self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            info!("add directory {} to mock store", path);
+            let mut dirs = self.dirs.lock().unwrap();
+            dirs.push(path);
+            Ok(())
+        }))
+    }
+
+    fn delete_path<'a>(
+        &'a self,
+        path: &std::path::PathBuf,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!()
+    }
+
+    fn create_user<'a>(
+        &'a self,
+        username: String,
+        uid: u32,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!()
+    }
+
+    fn register_path<'a>(
+        &'a self,
+        info: ValidPathInfo,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        unimplemented!()
+    }
+
+    fn add_temp_root<'a>(&'a self, path: &'a str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!()
     }
 
     fn add_text_to_store<'a>(
-        &'a mut self,
+        &'a self,
         suffix: &'a str,
         data: &'a [u8],
         refs: &'a Vec<String>,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        unimplemented!("store: add_text_to_store")
+        unimplemented!()
     }
 
-    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        unimplemented!("store: add_temp_root")
+    fn add_to_store<'a>(
+        &'a self,
+        path: ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        unimplemented!()
     }
 
-    fn as_any(&self) -> Option<&dyn std::any::Any> {
-        Some(self)
+    fn box_clone_write(&self) -> Box<dyn WriteStore> {
+        Box::new(self.clone())
+    }
+}
+
+impl ReadStore for MockStore {
+    fn query_path_info<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        unimplemented!()
+    }
+
+    fn is_valid_path<'a>(
+        &'a self,
+        path: &'a std::path::Path,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
+        unimplemented!()
+    }
+
+    fn box_clone_read(&self) -> Box<dyn ReadStore> {
+        Box::new(self.clone())
+    }
+}
+
+impl Store for MockStore {
+    fn get_store_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        LocalFutureObj::new(Box::new(async move { Ok("/nix/store".to_string()) }))
+    }
+
+    fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+        unimplemented!("store: get_state_dir")
+    }
+
+    fn box_clone(&self) -> Box<dyn Store> {
+        Box::new(self.clone())
     }
 }

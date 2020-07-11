@@ -5,7 +5,7 @@ use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
 pub use crate::error::NarError;
-use crate::Store;
+use crate::{store::WriteStore, Store};
 
 pub use crate::store::Hash;
 
@@ -25,7 +25,7 @@ pub struct NarResult {
 pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
     reader: Mutex<&'a mut T>,
 
-    store: Mutex<&'a mut Box<dyn Store>>,
+    store: Box<dyn WriteStore>,
 
     hasher: Mutex<Option<(ring::digest::Context, u64)>>,
 
@@ -33,16 +33,16 @@ pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
 }
 
 impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
-    pub fn new(base_path: &str, reader: &'a mut T, store: &'a mut Box<dyn Store>) -> Self {
+    pub fn new(base_path: &str, reader: &'a mut T, store: Box<dyn WriteStore>) -> Self {
         Self {
             base_path: base_path.to_string(),
             hasher: Mutex::new(Some((ring::digest::Context::new(&ring::digest::SHA256), 0))), // TODO: other hashing algs
             reader: Mutex::new(reader),
-            store: Mutex::new(store),
+            store,
         }
     }
 
-    pub async fn parse(&'a mut self) -> Result<NarResult, NarError> {
+    pub async fn parse(&'a self) -> Result<NarResult, NarError> {
         trace!("starting parsing of nar for path {}", self.base_path);
         let version = self.read_string().await?;
         debug!("got nar with version: '{}'", version);
@@ -92,8 +92,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                         Type::Regular => State::File(path.to_owned()),
                         Type::Directory => {
                             debug!("creating directory: '{}'", path);
-                            let mut store = self.store.lock().unwrap();
-                            store.make_directory(&path).await?;
+                            self.store.make_directory(&path).await?;
                             //State::Directory(path.to_owned())
                             State::None // state not needed here
                         }
@@ -104,22 +103,19 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             }
                             let target = self.read_string().await?;
                             debug!("creating symlink: '{} -> {}'", path, target);
-                            let mut store = self.store.lock().unwrap();
-                            store.make_symlink(&path, &target).await?;
+                            self.store.make_symlink(&path, &target).await?;
                             State::None // state not needed here
                         }
                     }
                 } else if s == "contents" {
                     match &state {
                         State::File(v) => {
-                            let mut store = self.store.lock().unwrap();
-                            store
+                            self.store
                                 .write_file(&v, &self.read_os_string().await?, false)
                                 .await?
                         }
                         State::Executable(v) => {
-                            let mut store = self.store.lock().unwrap();
-                            store
+                            self.store
                                 .write_file(&v, &self.read_os_string().await?, true)
                                 .await?
                         }
@@ -349,7 +345,7 @@ pub fn make_str_from_data(data: &[u8]) -> Vec<u8> {
 mod test {
     use super::{NarError, NarParser};
     use crate::store::mock_store::MockStore;
-    use crate::store::{Store, StoreError};
+    use crate::store::{ReadStore, Store, StoreError, WriteStore};
     use env_logger;
     use log::info;
     use tokio::io::AsyncRead;
@@ -361,7 +357,7 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let mut box_store = Box::new(store) as Box<dyn Store>;
+        let mut box_store = Box::new(store.clone()) as Box<dyn WriteStore>;
 
         // this is skipped in rustfmt to see packet boundings
         #[rustfmt::skip]
@@ -375,16 +371,11 @@ mod test {
              1, 0, 0, 0, 0, 0, 0, 0,  41,   0,   0,   0,   0,   0,   0,   0,
         ];
 
-        let mut parser = NarParser::new("/mock/string", &mut reader, &mut box_store);
+        let mut parser = NarParser::new("/mock/string", &mut reader, box_store);
 
         let ret = parser.parse().await.unwrap();
 
-        let b: &MockStore = box_store
-            .as_any()
-            .take()
-            .unwrap()
-            .downcast_ref::<MockStore>()
-            .unwrap();
+        let b = store;
 
         assert!(b.file_exists("/mock/string"));
         assert!(b.file_as_string("/mock/string").eq("hello"));
@@ -398,7 +389,7 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let mut box_store = Box::new(store) as Box<dyn Store>;
+        let mut box_store = Box::new(store.clone()) as Box<dyn WriteStore>;
 
         let mut reader: &[u8] = &[
             // created via `nix dump-path`
@@ -455,17 +446,12 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
-        let mut parser = NarParser::new("/mock/dir", &mut reader, &mut box_store);
+        let mut parser = NarParser::new("/mock/dir", &mut reader, box_store);
 
         println!("running parser");
         let ret = parser.parse().await.unwrap();
 
-        let b: &MockStore = box_store
-            .as_any()
-            .take()
-            .unwrap()
-            .downcast_ref::<MockStore>()
-            .unwrap();
+        let b = store;
 
         assert!(b.dir_exists("/mock/dir"));
         assert!(b.file_exists("/mock/dir/file"));
