@@ -93,6 +93,10 @@ impl UserLock {
     pub fn get_uid(&self) -> uid_t {
         self.uid
     }
+
+    pub fn get_gid(&self) -> gid_t {
+        self.gid
+    }
 }
 
 impl Drop for UserLock {
