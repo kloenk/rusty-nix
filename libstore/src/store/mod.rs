@@ -14,6 +14,10 @@ use chrono::NaiveDateTime;
 pub mod local_store;
 pub mod protocol;
 
+pub mod path;
+
+pub use path::StorePath;
+
 /// This is a store backend wich does not save things onto db
 #[cfg(test)]
 pub mod mock_store;
@@ -103,12 +107,12 @@ impl ValidPathInfo {
 
         Ok(format!(
             "1;{};{};{};{}",
-            print_store_path(&self.path),
+            &self.path.display(),
             nar_hash,
             self.nar_size.unwrap(),
             self.references
                 .iter()
-                .map(|v| print_store_path(&v))
+                .map(|v| v.display().to_string())
                 .collect::<Vec<String>>()
                 .join(",")
         ))
@@ -473,6 +477,29 @@ pub trait Store {
 
     fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>>;
 
+    fn parse_store_path<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            // TODO: canon path
+            let path = std::path::Path::new(path);
+            let p = path.parent();
+            if p.is_none() || p.unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+                return Err(StoreError::NotInStore {
+                    path: path.display().to_string(),
+                });
+            }
+            StorePath::new(path.file_name().unwrap().to_str().unwrap())
+        }))
+    }
+
+    fn print_store_path<'a>(&'a self, path: &'a StorePath) -> LocalFutureObj<'a, String> {
+        LocalFutureObj::new(Box::new(async move {
+            format!("{}/{}", self.get_store_dir().await.unwrap(), path)
+        }))
+    }
+
     fn box_clone(&self) -> Box<dyn Store>;
 }
 
@@ -497,10 +524,10 @@ pub async fn open_store(
     Ok(Box::new(store))
 }
 
-pub fn print_store_path(v: &std::path::Path) -> String {
+/*pub fn print_store_path(v: &std::path::Path) -> String {
     // TODO: storeDir +
     v.display().to_string()
-}
+}*/
 
 #[derive(Debug)]
 #[repr(u8)]
