@@ -489,6 +489,26 @@ pub trait Store {
         StorePath::new(path.file_name().unwrap().to_str().unwrap())
     }
 
+    fn parse_store_path_with_outputs<'a>(
+        &'a self,
+        path: &'a str,
+    ) -> Result<path::StorePathWithOutputs, StoreError> {
+        let parts: Vec<&str> = path.split("!").collect();
+        if parts.len() > 2 {
+            return Err(StoreError::NotInStore {
+                path: path.to_string(),
+            }); // TODO: own error type
+        }
+
+        let path = self.parse_store_path(parts[0])?;
+        let mut outputs = Vec::new();
+        if parts.len() == 2 {
+            outputs = parts[1].split(",").map(|v| v.to_string()).collect();
+        }
+
+        Ok(path::StorePathWithOutputs { path, outputs })
+    }
+
     fn print_store_path<'a>(&'a self, path: &'a StorePath) -> String {
         format!("{}/{}", self.get_store_dir().unwrap(), path)
     }

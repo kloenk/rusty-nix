@@ -54,6 +54,10 @@ impl StorePath {
     pub fn hash_part(&self) -> String {
         self.base_name[..(HASHLEN as usize)].to_string()
     }
+
+    /*pub fn to_string<T: super::Store>(&self, store: &Box<dyn super::Store>) -> String {
+        store.print_store_path(self)
+    }*/
 }
 
 use std::fmt;
@@ -90,6 +94,39 @@ impl PartialOrd for StorePath {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub struct StorePathWithOutputs {
+    pub path: StorePath,
+    pub outputs: Vec<String>,
+}
+
+impl StorePathWithOutputs {
+    pub fn new(path: StorePath) -> Self {
+        Self {
+            path,
+            outputs: Vec::new(),
+        }
+    }
+
+    pub fn new_with_outputs(path: StorePath, outputs: Vec<String>) -> Self {
+        Self { path, outputs }
+    }
+
+    /*pub fn to_string<T: super::Store>(&self, store: &T) -> String {
+        if self.outputs.len() == 0 {
+            self.path.to_string(store)
+        } else {
+            format!("{}!{}", self.path.to_string(store), self.outputs.join(","))
+        }
+    }*/
+}
+
+impl PartialEq<StorePath> for StorePathWithOutputs {
+    fn eq(&self, other: &StorePath) -> bool {
+        &self.path == other
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::StorePath;
@@ -122,5 +159,22 @@ mod test {
         let path = store.print_store_path(&path);
 
         assert_eq!(path, "/nix/store/ffffffffffffffffffffffffffffffff-x");
+    }
+
+    #[test]
+    fn with_outputs() {
+        use crate::Store;
+        let store = crate::store::mock_store::MockStore::new();
+
+        let path = format!("{}/{}!out,dev", super::STORE_PATH, DUMMY);
+
+        let paths = store.parse_store_path_with_outputs(&path).unwrap();
+        let paths_2 = super::StorePathWithOutputs::new_with_outputs(
+            StorePath::new(DUMMY).unwrap(),
+            vec!["out".to_string(), "dev".to_string()],
+        );
+
+        assert_eq!(paths, StorePath::new(DUMMY).unwrap());
+        assert_eq!(paths, paths_2);
     }
 }
