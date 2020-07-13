@@ -75,7 +75,7 @@ pub struct Connection<'a> {
     uid: u32,
     u_name: String,
 
-    store: Box<dyn crate::store::WriteStore>,
+    store: Box<dyn crate::store::BuildStore>,
 }
 
 impl<'a> Connection<'a> {
@@ -83,7 +83,7 @@ impl<'a> Connection<'a> {
         trusted: bool,
         client_version: u16,
         stream: &'a mut UnixStream,
-        store: Box<dyn crate::store::WriteStore>,
+        store: Box<dyn crate::store::BuildStore>,
         uid: u32,
         u_name: String,
     ) -> Self {
@@ -392,14 +392,18 @@ impl<'a> Connection<'a> {
     }
 
     async fn build_paths(&mut self) -> EmptyResult {
-        let drvs = self.read_strings().await?;
-        info!("building pathes: \n{}", drvs.join("\n"));
+        let mut drvs = self.read_strings().await?;
+        let drvs: Vec<crate::store::path::StorePathWithOutputs> = drvs
+            .drain(..)
+            .map(|v| self.store.parse_store_path_with_outputs(&v).unwrap())
+            .collect();
 
         let mode = self.read_int().await?;
         trace!("using mode: {}", mode);
 
         self.logger.start_work().await?;
         warn!("build pathes");
+        self.store.build_paths(drvs, mode as u8).await?;
         self.logger.stop_work(logger::WORKDONE).await?;
 
         self.write_u64(1).await?;

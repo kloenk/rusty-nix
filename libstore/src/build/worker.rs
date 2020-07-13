@@ -144,6 +144,13 @@ pub struct Worker {
 }
 
 impl Worker {
+    pub fn new() -> Self {
+        Self {
+            last_woken_up: std::time::SystemTime::now(),
+            nr_local_builds: 0,
+        }
+    }
+
     pub fn get_nr_local_builds(&self) -> usize {
         self.nr_local_builds
     }

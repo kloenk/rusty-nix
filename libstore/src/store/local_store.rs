@@ -7,7 +7,8 @@ use log::*;
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
-use super::{ReadStore, Store, StorePath, WriteStore};
+use super::path::StorePathWithOutputs;
+use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
 
 use std::sync::{Arc, RwLock};
 
@@ -101,6 +102,41 @@ impl LocalStore {
 
     pub fn get_store_dir(&self) -> String {
         format!("{}store", self.base_dir)
+    }
+}
+
+impl BuildStore for LocalStore {
+    fn build_paths<'a>(
+        &'a self,
+        drvs: Vec<StorePathWithOutputs>,
+        mode: u8,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            info!("building pathes: {:?}", drvs);
+
+            let worker = crate::build::worker::Worker::new();
+
+            self.prime_cache(&drvs).await?;
+
+            unimplemented!()
+        }))
+    }
+
+    fn query_missing<'a>(
+        &'a self,
+        paths: &'a Vec<StorePathWithOutputs>,
+    ) -> LocalFutureObj<'a, Result<super::MissingInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            warn!("unimplemented: LocalStore::query_missing");
+            let libnfc = StorePath::new("05dxizl4i8w5k32x2kg3cxnim56cgvyy-libnfc-1.7.1.drv")?;
+            Ok(super::MissingInfo {
+                download_size: 0,
+                nar_size: 0,
+                unknown: Vec::new(),
+                will_build: vec![libnfc],
+                will_substitute: Vec::new(),
+            })
+        }))
     }
 }
 

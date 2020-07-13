@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::*;
+
 use crate::error::StoreError;
 
 pub const HASHLEN: u8 = 32;
@@ -16,6 +18,7 @@ pub struct StorePath {
 }
 
 impl StorePath {
+    /// create new StorePath from basename
     pub fn new(base_name: &str) -> Result<Self, crate::error::StoreError> {
         let base_name = base_name.to_string();
         if base_name.len() < (HASHLEN + 1) as usize {
@@ -26,8 +29,10 @@ impl StorePath {
         for v in path.hash_part().as_bytes() {
             match (*v) as char {
                 'e' | 'o' | 'u' | 't' => {
-                    return Err(StoreError::NotInStore {
-                        path: path.base_name,
+                    warn!("create real error");
+                    return Err(StoreError::InvalidHashPart {
+                        path: path.base_name.clone(),
+                        hash_part: path.hash_part(),
                     });
                 }
                 _ => continue,

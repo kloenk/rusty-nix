@@ -327,6 +327,50 @@ impl std::fmt::Display for Hash {
     }
 }
 
+pub struct MissingInfo {
+    pub will_build: path::StorePaths,
+    pub will_substitute: path::StorePaths,
+    pub unknown: path::StorePaths,
+    pub download_size: u64,
+    pub nar_size: u64,
+}
+
+pub trait BuildStore: WriteStore + ReadStore + Store {
+    fn build_paths<'a>(
+        &'a self,
+        drvs: Vec<path::StorePathWithOutputs>,
+        mode: u8,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>; // TODO: make mode an enum
+
+    fn query_missing<'a>(
+        &'a self,
+        paths: &'a Vec<path::StorePathWithOutputs>,
+    ) -> LocalFutureObj<'a, Result<MissingInfo, StoreError>>;
+
+    fn prime_cache<'a>(
+        &'a self,
+        drvs: &'a Vec<path::StorePathWithOutputs>,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let missing = self.query_missing(drvs).await?;
+
+            let conf = crate::CONFIG.read().unwrap();
+            let max_build_jobs = conf.max_jobs.clone();
+            let max_build_jobs = max_build_jobs.parse::<usize>().unwrap_or(0); // TODO: handle other cases
+            drop(conf);
+
+            if missing.will_build.len() != 0 && max_build_jobs == 0
+            /* getMachines() */
+            {
+                return Err(StoreError::NoBuildJobs {
+                    jobs: missing.will_build.len(),
+                });
+            }
+            Ok(())
+        }))
+    }
+}
+
 pub trait WriteStore: ReadStore + Store {
     fn write_file<'a>(
         &'a self,
@@ -519,7 +563,7 @@ pub trait Store {
 pub async fn open_store(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
-) -> Result<Box<dyn WriteStore>, StoreError> {
+) -> Result<Box<dyn BuildStore>, StoreError> {
     if store_uri == "auto" {
         let store = local_store::LocalStore::open_store("/nix/", params).await?;
         return Ok(Box::new(store));

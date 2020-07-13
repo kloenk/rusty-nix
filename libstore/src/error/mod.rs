@@ -29,6 +29,8 @@ custom_error! {
         HashDecodePartialError { error: String } = "cannont decode {error}",
         InvalidFileIngestionMethode { methode: u8 } = "invalid FileIngestionMethode: {methode}",
         BadArchive{ msg: String } = "BadArchive: {msg}",
+        NoBuildJobs{ jobs: usize } = "{jobs} derivations need to be built, but neither local builds ('--max-jobs') nor remote builds ('--builders') are enabled",
+        InvalidHashPart{ path: String, hash_part: String } = "The path {path} does not have a valid hash part {hash_part}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
