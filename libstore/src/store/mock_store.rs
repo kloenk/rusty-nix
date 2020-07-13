@@ -6,7 +6,7 @@ use std::boxed::Box;
 
 use std::sync::{Arc, Mutex};
 
-use super::{ReadStore, Store, StoreError, ValidPathInfo, WriteStore};
+use super::{ReadStore, Store, StoreError, StorePath, ValidPathInfo, WriteStore};
 
 use std::collections::HashMap;
 
@@ -105,7 +105,7 @@ impl WriteStore for MockStore {
 
     fn delete_path<'a>(
         &'a self,
-        path: &std::path::PathBuf,
+        path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         unimplemented!()
     }
@@ -125,7 +125,10 @@ impl WriteStore for MockStore {
         unimplemented!()
     }
 
-    fn add_temp_root<'a>(&'a self, path: &'a str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    fn add_temp_root<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         unimplemented!()
     }
 
@@ -156,14 +159,14 @@ impl WriteStore for MockStore {
 impl ReadStore for MockStore {
     fn query_path_info<'a>(
         &'a self,
-        path: &'a str,
+        path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
         unimplemented!()
     }
 
     fn is_valid_path<'a>(
         &'a self,
-        path: &'a std::path::Path,
+        path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
         unimplemented!()
     }
@@ -174,11 +177,11 @@ impl ReadStore for MockStore {
 }
 
 impl Store for MockStore {
-    fn get_store_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(async move { Ok("/nix/store".to_string()) }))
+    fn get_store_dir<'a>(&'a self) -> Result<String, StoreError> {
+        Ok("/nix/store".to_string())
     }
 
-    fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+    fn get_state_dir<'a>(&'a self) -> Result<String, StoreError> {
         unimplemented!("store: get_state_dir")
     }
 

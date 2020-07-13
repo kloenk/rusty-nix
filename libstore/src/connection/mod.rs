@@ -186,6 +186,7 @@ impl<'a> Connection<'a> {
 
     async fn query_path_info(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
+        let path = self.store.parse_store_path(&path)?;
         debug!("queriying path info for {}", path);
         self.logger.start_work().await?;
         let info = self.store.query_path_info(&path).await;
@@ -202,14 +203,14 @@ impl<'a> Connection<'a> {
             Ok(v) => {
                 self.write_u64(1).await?;
                 if let Some(v) = v.deriver {
-                    self.write_string(&self.store.print_store_path(&v)?).await?;
+                    self.write_string(&self.store.print_store_path(&v)).await?;
                 } else {
                     self.write_string("").await?;
                 }
                 self.write_string(&v.nar_hash.to_string()).await?; // TODO: change to sha2 crate
                 self.write_u64(v.references.len() as u64).await?;
                 for v in &v.references {
-                    self.write_string(&self.store.print_store_path(v)?).await?;
+                    self.write_string(&self.store.print_store_path(v)).await?;
                 }
                 self.write_u64(v.registration_time.timestamp() as u64)
                     .await?;
@@ -234,9 +235,9 @@ impl<'a> Connection<'a> {
 
     async fn is_valid_path(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
-        let path = std::path::PathBuf::from(&path);
+        let path = self.store.parse_store_path(&path)?;
 
-        debug!("checking if {} is a valid path", path.display());
+        debug!("checking if {} is a valid path", path);
 
         self.logger.start_work().await?;
         let valid = self.store.is_valid_path(&path).await?;
@@ -294,15 +295,7 @@ impl<'a> Connection<'a> {
         let mut path = super::store::ValidPathInfo::from(path);
 
         let deriver = self.read_string().await?;
-        let deriver = if deriver == "" {
-            None
-        } else {
-            Some(
-                self.store
-                    .print_store_path(&std::path::PathBuf::from(deriver))?,
-            )
-        }
-        .map(|v| std::path::PathBuf::from(v));
+        let deriver = self.store.parse_store_path(&deriver).ok();
         path.deriver = deriver;
 
         debug!("add {} to store", path);
@@ -310,10 +303,11 @@ impl<'a> Connection<'a> {
         //path.nar_hash = super::store::Hash::sha256(self.read_string().await?);
         path.nar_hash = super::store::Hash::from_sha256(&self.read_string().await?)?;
         // read references
+        let store = &self.store;
         let references = self.read_strings().await?;
-        let references: Vec<std::path::PathBuf> = references
+        let references: crate::store::path::StorePaths = references
             .into_iter()
-            .map(move |v| std::path::PathBuf::from(v))
+            .map(move |v| store.parse_store_path(&v).unwrap())
             .collect();
         path.references = references;
         path.registration_time =
@@ -371,7 +365,8 @@ impl<'a> Connection<'a> {
         warn!("return path");
         warn!("hash: {}", hash);
         // TODO: add to sql database
-        self.write_string(&hash.to_string()).await?; // TODO: rename to path
+        let path = self.store.print_store_path(&hash.path);
+        self.write_string(&path).await?; // TODO: rename to path
 
         Ok(())
     }
@@ -389,7 +384,9 @@ impl<'a> Connection<'a> {
             .await?;
         self.logger.stop_work(logger::WORKDONE).await?;
 
-        self.write_string(&path.to_string()).await?;
+        let path = self.store.print_store_path(&path.path);
+
+        self.write_string(&path).await?;
 
         Ok(())
     }
@@ -428,11 +425,12 @@ impl<'a> Connection<'a> {
     ) -> Result<super::store::ValidPathInfo, StoreError> {
         use super::store::ValidPathInfo;
 
-        let store_dir = self.store.get_store_dir().await?;
+        let store_dir = self.store.get_store_dir()?;
         let extract_file = format!("{}/.temp/{}", store_dir, path);
-        self.store
-            .delete_path(&std::path::PathBuf::from(&extract_file))
-            .await?;
+        /*self.store
+        .delete_path(&extract_file)
+        .await?;*/
+        std::fs::remove_dir_all(&extract_file); // TODO: fix this hotfix
 
         if let Some(v) = std::path::Path::new(&extract_file).parent() {
             // only create parent incase we are just a file
@@ -450,24 +448,22 @@ impl<'a> Connection<'a> {
 
         let hash_compressed = parser.hash.clone();
         let hash_compressed = hash_compressed.compress_hash(20)?;
-        let result = format!(
+        let result = super::store::path::StorePath::new_hash(hash_compressed, path)?;
+        /*let result = format!(
             "{}/{}-{}",
-            self.store.get_store_dir().await?,
+            self.store.get_store_dir()?,
             hash_compressed,
             path
         )
         .replace("//", "/"); // TODO: make cleaner
-        let result = std::path::PathBuf::from(result);
-        //let result = result.canonicalize()?;
+        //let result = result.canonicalize()?;*/
 
         //std::fs::remove_dir_all(&result);
-        self.store
-            .delete_path(&std::path::PathBuf::from(&result))
-            .await?;
+        self.store.delete_path(&result).await?;
 
-        std::fs::rename(extract_file, &result)?; // TODO: will alsway have localStore?
+        std::fs::rename(extract_file, self.store.print_store_path(&result))?; // TODO: will alsway have localStore?
 
-        let result = ValidPathInfo::now(&result.display().to_string(), parser.hash, parser.len)?;
+        let result = ValidPathInfo::now(result, parser.hash, parser.len)?;
         let result = self.store.register_path(result).await?;
 
         Ok(result)

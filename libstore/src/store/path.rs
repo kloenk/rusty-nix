@@ -69,6 +69,12 @@ impl PartialEq for StorePath {
     }
 }
 
+impl PartialEq<str> for StorePath {
+    fn eq(&self, other: &str) -> bool {
+        self.base_name == other
+    }
+}
+
 impl Eq for StorePath {}
 
 use std::cmp::Ordering;
@@ -95,7 +101,6 @@ mod test {
         let store = crate::store::mock_store::MockStore::new();
         let path_2 = store
             .parse_store_path(&format!("/nix/store/{}", DUMMY))
-            .await
             .unwrap();
 
         assert_eq!(path_1, path_2);
@@ -114,7 +119,7 @@ mod test {
         let path = StorePath::new(DUMMY).unwrap();
         use crate::Store;
         let store = crate::store::mock_store::MockStore::new();
-        let path = store.print_store_path(&path).await;
+        let path = store.print_store_path(&path);
 
         assert_eq!(path, "/nix/store/ffffffffffffffffffffffffffffffff-x");
     }

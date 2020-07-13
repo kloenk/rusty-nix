@@ -24,10 +24,10 @@ pub mod mock_store;
 
 #[derive(Debug, Clone)]
 pub struct ValidPathInfo {
-    pub path: std::path::PathBuf,
-    pub deriver: Option<std::path::PathBuf>,
-    pub nar_hash: Hash,                      // TODO: type narHash
-    pub references: Vec<std::path::PathBuf>, // TODO: type StorePathSets
+    pub path: StorePath,
+    pub deriver: Option<StorePath>,
+    pub nar_hash: Hash,               // TODO: type narHash
+    pub references: path::StorePaths, // TODO: type StorePathSets
     pub registration_time: NaiveDateTime,
     pub nar_size: Option<u64>,
     pub id: u64, // internal use only
@@ -69,11 +69,11 @@ pub struct ValidPathInfo {
 }
 
 impl ValidPathInfo {
-    pub fn now(path: &str, hash: Hash, size: u64) -> Result<ValidPathInfo, StoreError> {
+    pub fn now(path: StorePath, hash: Hash, size: u64) -> Result<ValidPathInfo, StoreError> {
         use chrono::prelude::*;
         let now: DateTime<Utc> = Utc::now();
         Ok(Self {
-            path: std::path::PathBuf::from(path),
+            path,
             deriver: None,
             nar_hash: hash,
             references: Vec::new(),
@@ -92,10 +92,10 @@ impl ValidPathInfo {
     /// speaking superfluous, but might prevent endless/excessive data
     /// attacks.
     // std::string fingerprint(const Store & store) const;
-    pub fn fingerprint(&self) -> Result<String, StoreError> {
+    pub fn fingerprint(&self, store: &Box<dyn Store>) -> Result<String, StoreError> {
         if (self.nar_size == None || self.nar_size.unwrap() == 0) || self.nar_hash == Hash::None {
             return Err(StoreError::NoFingerprint {
-                path: self.path.display().to_string(),
+                path: self.path.to_string(),
             });
         }
 
@@ -107,12 +107,12 @@ impl ValidPathInfo {
 
         Ok(format!(
             "1;{};{};{};{}",
-            &self.path.display(),
+            store.print_store_path(&self.path),
             nar_hash,
             self.nar_size.unwrap(),
             self.references
                 .iter()
-                .map(|v| v.display().to_string())
+                .map(|v| store.print_store_path(v))
                 .collect::<Vec<String>>()
                 .join(",")
         ))
@@ -130,7 +130,7 @@ impl ValidPathInfo {
     /// produced by one of the specified keys, or maxSigs if the path
     /// is content-addressed.
     //size_t checkSignatures(const Store & store, const PublicKeys & publicKeys) const;
-    pub fn check_signatures(&self) -> Result<usize, StoreError> {
+    pub fn check_signatures(&self, store: &Box<dyn Store>) -> Result<usize, StoreError> {
         // TODO: ca foo
 
         use crate::crypto::PublicKeys;
@@ -141,7 +141,7 @@ impl ValidPathInfo {
 
         let mut good = 0;
         for v in &self.sigs {
-            if self.check_signature(&v, &public_keys)? {
+            if self.check_signature(&v, &public_keys, store)? {
                 good += 1;
             }
         }
@@ -155,18 +155,20 @@ impl ValidPathInfo {
         &self,
         sig: &str,
         public_keys: &crate::crypto::PublicKeys,
+        store: &Box<dyn Store>,
     ) -> Result<bool, StoreError> {
-        public_keys.verify(self.fingerprint()?.as_bytes(), sig)
+        public_keys.verify(self.fingerprint(store)?.as_bytes(), sig)
     }
 
     /*
     Strings shortRefs() const;*/
 }
 
+#[deprecated = "use try-from version"]
 impl std::convert::From<String> for ValidPathInfo {
     fn from(v: String) -> Self {
         Self {
-            path: std::path::PathBuf::from(&v),
+            path: StorePath::new(&v).unwrap(),
             deriver: None,
             nar_hash: Hash::None,
             references: Vec::new(),
@@ -180,12 +182,14 @@ impl std::convert::From<String> for ValidPathInfo {
     }
 }
 
+// TODO: build try-from version for Validpath from String
+
 impl std::fmt::Display for ValidPathInfo {
     /// This only returns a path.
     // TODO: maby add an extra type which makes a more verbose output with usage like std::path::PathBuf.display()
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // TODO: more verbose output?
-        write!(f, "{}", self.path.display())
+        write!(f, "{}", self.path)
     }
 }
 
@@ -355,17 +359,18 @@ pub trait WriteStore: ReadStore + Store {
                                                          }))
                                                      }*/
 
-    fn delete_path<'a>(
-        &'a self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+    fn delete_path<'a>(&'a self, path: &'a StorePath)
+        -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn register_path<'a>(
         &'a self,
         info: ValidPathInfo,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
-    fn add_temp_root<'a>(&'a self, path: &'a str) -> LocalFutureObj<'a, Result<(), StoreError>>;
+    fn add_temp_root<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn add_to_store<'a>(
         &'a self,
@@ -387,12 +392,12 @@ pub trait WriteStore: ReadStore + Store {
 pub trait ReadStore: Store {
     fn query_path_info<'a>(
         &'a self,
-        path: &'a str,
+        path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
     fn is_valid_path<'a>(
         &'a self,
-        path: &'a std::path::Path,
+        path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<bool, StoreError>>;
 
     fn make_text_path<'a>(
@@ -400,7 +405,7 @@ pub trait ReadStore: Store {
         suffix: &'a str,
         hash: &'a Hash,
         refs: &'a Vec<String>,
-    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
+    ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             if !hash.is_sha256() {
                 return Err(StoreError::MissingHash {
@@ -430,7 +435,7 @@ pub trait ReadStore: Store {
         file_type: &'a str,
         hash: &'a Hash,
         name: &'a str,
-    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
+    ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
         // TODO: ValidPath as result?
         LocalFutureObj::new(Box::new(async move {
             /*/*let s = format!(
@@ -450,21 +455,16 @@ pub trait ReadStore: Store {
                 "{}:{}:{}:{}",
                 file_type,
                 hash.to_sql_string(),
-                self.get_store_dir().await?,
+                self.get_store_dir()?,
                 name
             ); // TODO: remove sha256
             let hash = Hash::hash_string(&s)?;
             let hash = hash.compress_hash(20)?;
 
-            let s = format!("{}/{}-{}", self.get_store_dir().await?, hash, name);
+            //let s = format!("{}/{}-{}", self.get_store_dir()?, hash, name);
 
-            Ok(s)
+            Ok(StorePath::new(&format!("{}-{}", hash, name))?)
         }))
-    }
-
-    fn print_store_path<'a>(&'a self, p: &'a std::path::Path) -> Result<String, StoreError> {
-        // TODO: C++ adds `storeDir + "/"` infront??
-        Ok(p.display().to_string())
     }
 
     fn box_clone_read(&self) -> Box<dyn ReadStore>;
@@ -473,31 +473,24 @@ pub trait ReadStore: Store {
 /// This is the main store Trait, needed by every kind of store.
 /// Every Store has to implement Clone. If a store has some data which in mutable inside it has to handle it itself.
 pub trait Store {
-    fn get_store_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>>;
+    fn get_store_dir<'a>(&'a self) -> Result<String, StoreError>;
 
-    fn get_state_dir<'a>(&'a self) -> LocalFutureObj<'a, Result<String, StoreError>>;
+    fn get_state_dir<'a>(&'a self) -> Result<String, StoreError>;
 
-    fn parse_store_path<'a>(
-        &'a self,
-        path: &'a str,
-    ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            // TODO: canon path
-            let path = std::path::Path::new(path);
-            let p = path.parent();
-            if p.is_none() || p.unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
-                return Err(StoreError::NotInStore {
-                    path: path.display().to_string(),
-                });
-            }
-            StorePath::new(path.file_name().unwrap().to_str().unwrap())
-        }))
+    fn parse_store_path<'a>(&'a self, path: &'a str) -> Result<StorePath, StoreError> {
+        // TODO: canon path
+        let path = std::path::Path::new(path);
+        let p = path.parent();
+        if p.is_none() || p.unwrap() != std::path::Path::new(&self.get_store_dir()?) {
+            return Err(StoreError::NotInStore {
+                path: path.display().to_string(),
+            });
+        }
+        StorePath::new(path.file_name().unwrap().to_str().unwrap())
     }
 
-    fn print_store_path<'a>(&'a self, path: &'a StorePath) -> LocalFutureObj<'a, String> {
-        LocalFutureObj::new(Box::new(async move {
-            format!("{}/{}", self.get_store_dir().await.unwrap(), path)
-        }))
+    fn print_store_path<'a>(&'a self, path: &'a StorePath) -> String {
+        format!("{}/{}", self.get_store_dir().unwrap(), path)
     }
 
     fn box_clone(&self) -> Box<dyn Store>;
