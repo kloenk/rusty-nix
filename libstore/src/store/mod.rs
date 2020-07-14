@@ -327,12 +327,30 @@ impl std::fmt::Display for Hash {
     }
 }
 
+#[derive(Debug)]
 pub struct MissingInfo {
+    pub done: Vec<String>,
+
     pub will_build: path::StorePaths,
     pub will_substitute: path::StorePaths,
     pub unknown: path::StorePaths,
     pub download_size: u64,
     pub nar_size: u64,
+}
+
+impl MissingInfo {
+    pub fn new() -> Self {
+        Self {
+            nar_size: 0,
+            download_size: 0,
+
+            will_build: Vec::new(),
+            will_substitute: Vec::new(),
+            unknown: Vec::new(),
+
+            done: Vec::new(),
+        }
+    }
 }
 
 pub trait BuildStore: WriteStore + ReadStore + Store {

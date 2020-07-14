@@ -127,15 +127,48 @@ impl BuildStore for LocalStore {
         paths: &'a Vec<StorePathWithOutputs>,
     ) -> LocalFutureObj<'a, Result<super::MissingInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
+            info!("quering info about missing paths");
+
+            use std::sync::{Arc, Mutex};
+            let state = Arc::new(Mutex::new(super::MissingInfo::new()));
+
+            let do_path = |path: &'a StorePathWithOutputs,
+                           state: Arc<Mutex<super::MissingInfo>>| async move {
+                let mut state = state.lock().unwrap();
+                if state.done.contains(&path.path.name()) {
+                    return Ok(());
+                }
+                state.done.push(path.path.name());
+                drop(state);
+
+                println!("working on {}", path.path.name());
+
+                if path.path.is_derivation() {
+                    //if store.is_valid_path(path.path) {
+                    //insert into unknown
+                    //}
+                    let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
+                }
+
+                return Err(StoreError::Unimplemented {
+                    msg: "foobar".to_string(),
+                });
+            };
+
+            let mut work = Vec::new();
+            for v in paths {
+                work.push(do_path(v, state.clone()));
+            }
+
+            futures::future::join_all(work).await;
+
             warn!("unimplemented: LocalStore::query_missing");
             let libnfc = StorePath::new("05dxizl4i8w5k32x2kg3cxnim56cgvyy-libnfc-1.7.1.drv")?;
-            Ok(super::MissingInfo {
-                download_size: 0,
-                nar_size: 0,
-                unknown: Vec::new(),
-                will_build: vec![libnfc],
-                will_substitute: Vec::new(),
-            })
+
+            let mut state: super::MissingInfo =
+                Arc::try_unwrap(state).unwrap().into_inner().unwrap();
+            state.will_build.push(libnfc);
+            Ok(state)
         }))
     }
 }

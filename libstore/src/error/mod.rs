@@ -31,6 +31,7 @@ custom_error! {
         BadArchive{ msg: String } = "BadArchive: {msg}",
         NoBuildJobs{ jobs: usize } = "{jobs} derivations need to be built, but neither local builds ('--max-jobs') nor remote builds ('--builders') are enabled",
         InvalidHashPart{ path: String, hash_part: String } = "The path {path} does not have a valid hash part {hash_part}",
+        InvalidDerivation{ msg: String } = "InvalidDerivation: {msg}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
