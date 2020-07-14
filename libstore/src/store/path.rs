@@ -12,7 +12,7 @@ pub const STORE_PATH: &str = "/nix/store"; // TODO: uses non hardcoded thingi
 pub type StorePaths = Vec<StorePath>;
 pub type OutputPathMap = HashMap<String, StorePath>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct StorePath {
     base_name: String,
 }

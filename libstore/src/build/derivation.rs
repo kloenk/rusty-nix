@@ -8,7 +8,15 @@ use crate::store::{StoreError, StorePath};
 pub struct Derivation {
     pub outputs: HashMap<String, DerivationOutput>,
 
-    pub inputs: std::collections::HashMap<crate::store::StorePath, String>,
+    pub input_srcs: crate::store::path::StorePaths,
+    pub platform: String,
+    pub builder: String,
+
+    pub args: Vec<String>,
+    /// Environment variables
+    pub env: HashMap<String, String>,
+
+    pub inputs: HashMap<StorePath, Vec<String>>,
 }
 
 impl Derivation {
@@ -44,7 +52,6 @@ impl Derivation {
         for v in outputs {
             let v = v.trim_matches('(');
             let v: Vec<&str> = v.split(",").map(|v| v.trim_matches('"')).collect();
-            println!("len: {}: {:?}", v.len(), v);
             if v.len() == 1 {
                 continue;
             }
@@ -62,7 +69,6 @@ impl Derivation {
         // parse the list of inputs
         buf.clear();
         reader.read_until('[' as u8, &mut buf).await?;
-        println!("{:?}", &buf);
         if ",[".as_bytes() != buf.as_slice() {
             return Err(StoreError::InvalidDerivation {
                 msg: "not a derivation".to_string(),
@@ -70,9 +76,136 @@ impl Derivation {
         }
 
         buf.clear();
-        reader.read_until(']' as u8, &mut buf).await?;
+        /*while reader.read_u8().await? == ',' as u8 {
+            if reader.read_u8().await? != '(' as u8 {
+                return Err(StoreError::InvalidDerivation {
+                    msg: "expected (".to_string(),
+                });
+            }
+            buf.clear();
+            reader.read_until(')' as u8, &mut buf).await?;
+            println!("read: {}", String::from_utf8_lossy(&buf));
+        }*/
+        loop {
+            if reader.read_u8().await? != '(' as u8 {
+                return Err(StoreError::InvalidDerivation {
+                    msg: "expected (".to_string(),
+                });
+            }
+            buf.clear();
+            reader.read_until(')' as u8, &mut buf).await?;
+            let val = String::from_utf8_lossy(&buf);
+            let val = val.trim_matches(')');
+            let val: Vec<&str> = val.splitn(2, ',').collect();
+            if val.len() != 2 {
+                return Err(StoreError::InvalidDerivation {
+                    msg: "not a derivation".to_string(),
+                });
+            }
 
-        println!("read: {}", String::from_utf8_lossy(&buf));
+            let path = val[0].trim_matches('"');
+            let path = &path[11..]; // TODO: use store here
+
+            let outputs = val[1].trim_matches(|c| c == '[' || c == ']');
+            let outputs: Vec<String> = outputs
+                .split(',')
+                .map(|v| v.trim_matches('"').to_string())
+                .collect();
+
+            ret.inputs.insert(StorePath::new(path)?, outputs);
+
+            if reader.read_u8().await? != ',' as u8 {
+                break;
+            }
+        }
+
+        buf.clear();
+        reader.read_until('[' as u8, &mut buf).await?;
+        if buf.as_slice() != ",[".as_bytes() {
+            return Err(StoreError::InvalidDerivation {
+                msg: "not a derivation".to_string(),
+            });
+        }
+        buf.clear();
+        reader.read_until(']' as u8, &mut buf).await?;
+        let val = String::from_utf8_lossy(&buf);
+        let val = val.trim_matches(']');
+        let val: Result<Vec<StorePath>, StoreError> = val
+            .split(',')
+            .map(|v| v.trim_matches('"'))
+            .map(|v| StorePath::new(&v[11..]))
+            .collect();
+        ret.input_srcs = val?;
+        reader.read_u8().await?;
+
+        buf.clear();
+        reader.read_until(',' as u8, &mut buf).await?;
+        let val = String::from_utf8_lossy(&buf);
+        let val = val.trim_matches(|c| c == '"' || c == ',');
+        ret.platform = val.to_string();
+
+        buf.clear();
+        reader.read_until(',' as u8, &mut buf).await?;
+        let val = String::from_utf8_lossy(&buf);
+        let val = val.trim_matches(|c| c == '"' || c == ',');
+        ret.builder = val.to_string();
+
+        // parse args
+        reader.read_u8().await?;
+        buf.clear();
+        reader.read_until(']' as u8, &mut buf).await?;
+        let val = String::from_utf8_lossy(&buf);
+        let val = val.trim_matches(']');
+        let val: Vec<String> = val
+            .split(',')
+            .map(|v| v.trim_matches('"'))
+            .map(|v| v.to_string())
+            .collect();
+        ret.args = val;
+        reader.read_u16().await?; // ,[
+
+        // parse env vars
+        loop {
+            if reader.read_u8().await? != '(' as u8 {
+                return Err(StoreError::InvalidDerivation {
+                    msg: "expected (".to_string(),
+                });
+            }
+            buf.clear();
+            reader.read_until(')' as u8, &mut buf).await?;
+            let val = String::from_utf8_lossy(&buf);
+            let val = val.trim_matches(')');
+            let val: Vec<&str> = val.splitn(2, ',').collect();
+            if val.len() != 2 {
+                return Err(StoreError::InvalidDerivation {
+                    msg: "not a derivation".to_string(),
+                });
+            }
+
+            let name = val[0].trim_matches('"');
+
+            /*let outputs = val[1].trim_matches(|c| c == '[' || c == ']');
+            let outputs: Vec<String> = outputs
+                .split(',')
+                .map(|v| v.trim_matches('"').to_string())
+                .collect();*/
+            
+            let val = val[1].trim_matches('"');
+
+            ret.env.insert(name.to_string(), val.to_string());
+
+            if reader.read_u8().await? != ',' as u8 {
+                break;
+            }
+        }
+
+        buf.clear();
+        reader.read_to_end(&mut buf).await?;
+        if buf.as_slice() != ")".as_bytes() {
+            return Err(StoreError::InvalidDerivation {
+                msg: "expected )".to_string(),
+            });
+        }
 
         Ok(ret)
     }
@@ -80,7 +213,12 @@ impl Derivation {
     pub fn new() -> Self {
         Self {
             outputs: HashMap::new(),
-            inputs: std::collections::HashMap::new(),
+            input_srcs: Vec::new(),
+            inputs: HashMap::new(),
+            platform: String::new(), // TODO: should this default to currentSystem?
+            builder: String::new(),  // TODO: should this be a StorePath?
+            args: Vec::new(),
+            env: HashMap::new(),
         }
     }
 }
