@@ -76,16 +76,6 @@ impl Derivation {
         }
 
         buf.clear();
-        /*while reader.read_u8().await? == ',' as u8 {
-            if reader.read_u8().await? != '(' as u8 {
-                return Err(StoreError::InvalidDerivation {
-                    msg: "expected (".to_string(),
-                });
-            }
-            buf.clear();
-            reader.read_until(')' as u8, &mut buf).await?;
-            println!("read: {}", String::from_utf8_lossy(&buf));
-        }*/
         loop {
             if reader.read_u8().await? != '(' as u8 {
                 return Err(StoreError::InvalidDerivation {
@@ -184,12 +174,6 @@ impl Derivation {
 
             let name = val[0].trim_matches('"');
 
-            /*let outputs = val[1].trim_matches(|c| c == '[' || c == ']');
-            let outputs: Vec<String> = outputs
-                .split(',')
-                .map(|v| v.trim_matches('"').to_string())
-                .collect();*/
-            
             let val = val[1].trim_matches('"');
 
             ret.env.insert(name.to_string(), val.to_string());

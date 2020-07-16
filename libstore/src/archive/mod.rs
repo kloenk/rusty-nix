@@ -2,7 +2,7 @@ use byteorder::{ByteOrder, LittleEndian};
 use tokio::io::{AsyncRead, AsyncReadExt};
 
 use futures::future::LocalFutureObj;
-use std::boxed::Box;
+use std::rc::Rc;
 
 pub use crate::error::NarError;
 use crate::{store::WriteStore, Store};
@@ -25,7 +25,7 @@ pub struct NarResult {
 pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
     reader: Mutex<&'a mut T>,
 
-    store: Box<dyn WriteStore>,
+    store: Rc<dyn WriteStore>,
 
     hasher: Mutex<Option<(ring::digest::Context, u64)>>,
 
@@ -33,7 +33,7 @@ pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
 }
 
 impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
-    pub fn new(base_path: &str, reader: &'a mut T, store: Box<dyn WriteStore>) -> Self {
+    pub fn new(base_path: &str, reader: &'a mut T, store: Rc<dyn WriteStore>) -> Self {
         Self {
             base_path: base_path.to_string(),
             hasher: Mutex::new(Some((ring::digest::Context::new(&ring::digest::SHA256), 0))), // TODO: other hashing algs
@@ -357,7 +357,8 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let mut box_store = Box::new(store.clone()) as Box<dyn WriteStore>;
+        let store = std::rc::Rc::new(store);
+        let mut box_store = store as std::rc::Rc<dyn WriteStore>;
 
         // this is skipped in rustfmt to see packet boundings
         #[rustfmt::skip]
@@ -371,7 +372,7 @@ mod test {
              1, 0, 0, 0, 0, 0, 0, 0,  41,   0,   0,   0,   0,   0,   0,   0,
         ];
 
-        let mut parser = NarParser::new("/mock/string", &mut reader, box_store);
+        let mut parser = NarParser::new("/mock/string", &mut reader, store);
 
         let ret = parser.parse().await.unwrap();
 
@@ -389,7 +390,7 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let mut box_store = Box::new(store.clone()) as Box<dyn WriteStore>;
+        let store = std::rc::Rc::new(store);
 
         let mut reader: &[u8] = &[
             // created via `nix dump-path`
@@ -446,7 +447,7 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
-        let mut parser = NarParser::new("/mock/dir", &mut reader, box_store);
+        let mut parser = NarParser::new("/mock/dir", &mut reader, store);
 
         println!("running parser");
         let ret = parser.parse().await.unwrap();

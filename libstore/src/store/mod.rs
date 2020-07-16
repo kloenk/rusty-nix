@@ -6,6 +6,7 @@ use log::*;
 pub use futures::future::LocalFutureObj;
 /// These are exported, because there are needed for async traits
 pub use std::boxed::Box;
+use std::rc::Rc;
 
 pub use crate::error::StoreError;
 
@@ -387,6 +388,8 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
             Ok(())
         }))
     }
+
+    fn box_clone_Build(&self) -> Box<dyn BuildStore>;
 }
 
 pub trait WriteStore: ReadStore + Store {
@@ -581,10 +584,10 @@ pub trait Store {
 pub async fn open_store(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
-) -> Result<Box<dyn BuildStore>, StoreError> {
+) -> Result<Rc<dyn BuildStore>, StoreError> {
     if store_uri == "auto" {
         let store = local_store::LocalStore::open_store("/nix/", params).await?;
-        return Ok(Box::new(store));
+        return Ok(Rc::new(store));
     }
 
     // TODO: magic for other store bachends
@@ -596,7 +599,7 @@ pub async fn open_store(
 
     let path = &store_uri["file://".len()..];
     let store = local_store::LocalStore::open_store(path, params).await?;
-    Ok(Box::new(store))
+    Ok(Rc::new(store))
 }
 
 /*pub fn print_store_path(v: &std::path::Path) -> String {

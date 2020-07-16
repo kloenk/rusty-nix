@@ -1,3 +1,4 @@
+use std::rc::Rc;
 use std::sync::{Arc, RwLock};
 
 use byteorder::{ByteOrder, LittleEndian};
@@ -75,7 +76,7 @@ pub struct Connection<'a> {
     uid: u32,
     u_name: String,
 
-    store: Box<dyn crate::store::BuildStore>,
+    store: Rc<dyn crate::store::BuildStore>,
 }
 
 impl<'a> Connection<'a> {
@@ -83,7 +84,7 @@ impl<'a> Connection<'a> {
         trusted: bool,
         client_version: u16,
         stream: &'a mut UnixStream,
-        store: Box<dyn crate::store::BuildStore>,
+        store: Rc<dyn crate::store::BuildStore>,
         uid: u32,
         u_name: String,
     ) -> Self {
@@ -442,11 +443,8 @@ impl<'a> Connection<'a> {
         }
 
         let mut reader = self.reader.write().unwrap();
-        let parser = crate::archive::NarParser::new(
-            &extract_file,
-            &mut *reader,
-            self.store.box_clone_write(),
-        );
+        let parser =
+            crate::archive::NarParser::new(&extract_file, &mut *reader, self.store.clone());
         let parser = parser.parse().await.unwrap();
         drop(reader);
 
