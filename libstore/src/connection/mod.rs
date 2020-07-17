@@ -293,7 +293,9 @@ impl<'a> Connection<'a> {
     async fn add_to_store_nar(&mut self) -> EmptyResult {
         let path = self.read_string().await?;
         //let path = std::path::PathBuf::from(&path);
-        let mut path = super::store::ValidPathInfo::from(path);
+        let path = self.store.parse_store_path(&path)?;
+        //let mut path = super::store::ValidPathInfo::from(path);
+        let mut path = super::store::ValidPathInfo::new(path);
 
         let deriver = self.read_string().await?;
         let deriver = self.store.parse_store_path(&deriver).ok();

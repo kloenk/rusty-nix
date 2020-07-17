@@ -133,8 +133,9 @@ impl BuildStore for Arc<LocalStore> {
             use std::sync::{Arc, Mutex};
             let state = Arc::new(Mutex::new(super::MissingInfo::new()));
 
-            /*let do_path = |path: &'a StorePathWithOutputs,
-                           state: Arc<Mutex<super::MissingInfo>>, store: Rc<LocalStore>| async move {
+            let do_path = |path: &'a StorePathWithOutputs,
+                           state: Arc<Mutex<super::MissingInfo>>,
+                           store: Arc<LocalStore>| async move {
                 let mut state = state.lock().unwrap();
                 if state.done.contains(&path.path.name()) {
                     return Ok(());
@@ -159,10 +160,10 @@ impl BuildStore for Arc<LocalStore> {
 
             let mut work = Vec::new();
             for v in paths {
-                work.push(do_path(v, state.clone(), self));
+                work.push(do_path(v, state.clone(), self.clone()));
             }
 
-            futures::future::join_all(work).await;*/
+            futures::future::join_all(work).await;
 
             warn!("unimplemented: LocalStore::query_missing");
             let libnfc = StorePath::new("05dxizl4i8w5k32x2kg3cxnim56cgvyy-libnfc-1.7.1.drv")?;

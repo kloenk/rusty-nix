@@ -70,6 +70,21 @@ pub struct ValidPathInfo {
 }
 
 impl ValidPathInfo {
+    pub fn new(path: StorePath) -> ValidPathInfo {
+        Self {
+            path,
+            deriver: None,
+            nar_hash: Hash::None,
+            references: Vec::new(),
+            registration_time: chrono::NaiveDateTime::from_timestamp(0, 0), // TODO: ??
+            nar_size: None,
+            id: 0,
+            ultimate: false,
+            sigs: Vec::new(),
+            ca: None,
+        }
+    }
+
     pub fn now(path: StorePath, hash: Hash, size: u64) -> Result<ValidPathInfo, StoreError> {
         use chrono::prelude::*;
         let now: DateTime<Utc> = Utc::now();
