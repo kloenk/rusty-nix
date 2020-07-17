@@ -5,6 +5,84 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt};
 use crate::store::{StoreError, StorePath};
 
 #[derive(Debug)]
+pub struct ParsedDerivation {
+    pub drv_path: StorePath,
+    pub derivation: Derivation,
+    // structuredAttrs: Option<Rc<json::Value>>, // TODO: Rc or Arc?
+}
+
+impl ParsedDerivation {
+    pub fn new(drv_path: StorePath, derivation: Derivation) -> Result<Self, StoreError> {
+        if derivation.env.contains_key("__json") {
+            unimplemented!("__json attribute in derivation");
+        }
+
+        Ok(Self {
+            drv_path,
+            derivation,
+        })
+    }
+
+    pub fn get_string_attr(&self, name: &str) -> Option<String> {
+        //TODO: structuredAttrs
+        self.derivation.env.get(name).map(|v| v.to_string())
+    }
+
+    pub fn get_bool_attr(&self, name: &str) -> bool {
+        // TODO: structuredAttrs
+        self.get_string_attr(name)
+            .map(|v| v == "1")
+            .unwrap_or(false)
+    }
+
+    pub fn get_strings_attr(&self, name: &str) -> Option<Vec<String>> {
+        // TODO: structuredAttrs
+        self.get_string_attr(name)
+            .map(|v| v.split(' ').map(|v| v.to_string()).collect())
+    }
+
+    pub fn get_required_system_features(&self) -> Vec<String> {
+        self.get_strings_attr("requiredSystemFeatures")
+            .unwrap_or_else(|| Vec::new())
+    }
+
+    pub fn can_build_locally(&self) -> bool {
+        let settings = crate::CONFIG.read().unwrap();
+        let system = settings.system.clone();
+        let extra_platform = settings.extra_platforms.clone();
+        let features = settings.system_features.clone();
+        drop(settings);
+
+        if self.derivation.platform != system
+            && !extra_platform.contains(&self.derivation.platform)
+            && !self.derivation.is_builtin()
+        {
+            return false;
+        }
+
+        for v in &self.get_required_system_features() {
+            if !features.contains(v) {
+                return false;
+            }
+        }
+
+        true
+    }
+
+    pub fn will_build_locally(&self) -> bool {
+        self.get_bool_attr("preferLocalBuild") && self.can_build_locally()
+    }
+
+    pub fn substitutes_allowed(&self) -> bool {
+        self.get_bool_attr("allowSubstitutes")
+    }
+
+    pub fn content_addressed(&self) -> bool {
+        self.get_string_attr("__contentAddressed").is_some()
+    }
+}
+
+#[derive(Debug)]
 pub struct Derivation {
     pub outputs: HashMap<String, DerivationOutput>,
 
@@ -205,12 +283,16 @@ impl Derivation {
             env: HashMap::new(),
         }
     }
+
+    pub fn is_builtin(&self) -> bool {
+        self.builder.starts_with("builtin:")
+    }
 }
 
 #[derive(Debug)]
 pub struct DerivationOutput {
-    path: StorePath,
-    hash: Option<String>, // TODO: use Hash type
+    pub path: StorePath,
+    pub hash: Option<String>, // TODO: use Hash type
 }
 
 impl DerivationOutput {

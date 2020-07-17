@@ -119,7 +119,9 @@ impl BuildStore for Arc<LocalStore> {
 
             self.prime_cache(&drvs).await?;
 
-            unimplemented!()
+            warn!("unimplemented build_paths");
+            unimplemented!();
+            Ok(())
         }))
     }
 
@@ -135,47 +137,103 @@ impl BuildStore for Arc<LocalStore> {
 
             let do_path = |path: &'a StorePathWithOutputs,
                            state: Arc<Mutex<super::MissingInfo>>,
-                           store: Arc<LocalStore>| async move {
-                let mut state = state.lock().unwrap();
-                if state.done.contains(&path.path.name()) {
+                           store: Arc<LocalStore>,
+                           substitute: bool| async move {
+                let mut state_l = state.lock().unwrap();
+                if state_l.done.contains(&path.path.name()) {
                     return Ok(());
                 }
-                state.done.push(path.path.name());
-                drop(state);
+                state_l.done.push(path.path.name());
+                drop(state_l);
 
                 println!("working on {}", path.path.name());
 
                 if path.path.is_derivation() {
-                    //if store.is_valid_path(path.path) {
-                    //insert into unknown
-                    //}
+                    if !store.is_valid_path(&path.path).await? {
+                        //insert into unknown
+                        // TODO: we could try to substitute the drv
+                        let mut state_l = state.lock().unwrap();
+                        state_l.unknown.push(path.path.clone());
+                        return Ok(());
+                    }
                     let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
-                    store.make_directory("/nix/store/foobar23").await?;
+                    let drv =
+                        crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
+
+                    // TODO:
+                    /*
+                    PathSet invalid;
+                    for (auto & j : drv->outputs)
+                        if (wantOutput(j.first, path.outputs)
+                            && !isValidPath(j.second.path))
+                            invalid.insert(printStorePath(j.second.path));
+                    if (invalid.empty()) return;*/
+                    let mut invalid = crate::store::path::StorePaths::new();
+                    for (name, out) in &drv.derivation.outputs {
+                        if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
+                            invalid.push(out.path.clone());
+                        }
+                    }
+                    if invalid.is_empty() {
+                        return Ok(());
+                    }
+
+                    if substitute && drv.substitutes_allowed() {
+                        for v in invalid {
+                            debug!("check for subst: {}", v);
+                            unimplemented!("qeue path");
+                            // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
+                        }
+                    }
+                } else {
+                    /*
+                    if (isValidPath(path.path)) return;
+
+                    SubstitutablePathInfos infos;
+                    querySubstitutablePathInfos({path.path}, infos);
+
+                    if (infos.empty()) {
+                        auto state(state_.lock());
+                        state->unknown.insert(path.path);
+                        return;
+                    }
+
+                    auto info = infos.find(path.path);
+                    assert(info != infos.end());
+
+                    {
+                        auto state(state_.lock());
+                        state->willSubstitute.insert(path.path);
+                        state->downloadSize += info->second.downloadSize;
+                        state->narSize += info->second.narSize;
+                    }
+
+                    for (auto & ref : info->second.references)
+                        pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
+                        */
                 }
 
-                return Err(StoreError::Unimplemented {
-                    msg: "foobar".to_string(),
-                });
+                /*return Err(StoreError::Unimplemented {
+                    msg: "unimplemented".to_string(),
+                });*/
+                Ok(())
             };
 
             let mut work = Vec::new();
             for v in paths {
-                work.push(do_path(v, state.clone(), self.clone()));
+                work.push(do_path(v, state.clone(), self.clone(), true)); // TODO: substitute from settings
             }
 
-            futures::future::join_all(work).await;
+            let ret: Result<Vec<()>, StoreError> =
+                futures::future::join_all(work).await.into_iter().collect();
+            ret?;
 
-            warn!("unimplemented: LocalStore::query_missing");
-            let libnfc = StorePath::new("05dxizl4i8w5k32x2kg3cxnim56cgvyy-libnfc-1.7.1.drv")?;
-
-            let mut state: super::MissingInfo =
-                Arc::try_unwrap(state).unwrap().into_inner().unwrap();
-            state.will_build.push(libnfc);
+            let state: super::MissingInfo = Arc::try_unwrap(state).unwrap().into_inner().unwrap();
             Ok(state)
         }))
     }
 
-    fn box_clone_Build(&self) -> Box<dyn BuildStore> {
+    fn box_clone_build(&self) -> Box<dyn BuildStore> {
         Box::new(self.clone())
     }
 }

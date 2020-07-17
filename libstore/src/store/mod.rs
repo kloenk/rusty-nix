@@ -393,6 +393,8 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
             let max_build_jobs = max_build_jobs.parse::<usize>().unwrap_or(0); // TODO: handle other cases
             drop(conf);
 
+            println!("missing: {:?}", missing);
+
             if missing.will_build.len() != 0 && max_build_jobs == 0
             /* getMachines() */
             {
@@ -404,7 +406,7 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
         }))
     }
 
-    fn box_clone_Build(&self) -> Box<dyn BuildStore>;
+    fn box_clone_build(&self) -> Box<dyn BuildStore>;
 }
 
 pub trait WriteStore: ReadStore + Store {
