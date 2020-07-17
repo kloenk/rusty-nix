@@ -134,6 +134,8 @@ impl PartialEq<StorePath> for StorePathWithOutputs {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::StorePath;
     use super::DUMMY;
     #[tokio::test]
@@ -141,6 +143,7 @@ mod test {
         use crate::Store;
         let path_1 = StorePath::new(DUMMY).unwrap();
         let store = crate::store::mock_store::MockStore::new();
+        let store = Arc::new(store);
         let path_2 = store
             .parse_store_path(&format!("/nix/store/{}", DUMMY))
             .unwrap();
@@ -161,6 +164,7 @@ mod test {
         let path = StorePath::new(DUMMY).unwrap();
         use crate::Store;
         let store = crate::store::mock_store::MockStore::new();
+        let store = Arc::new(store);
         let path = store.print_store_path(&path);
 
         assert_eq!(path, "/nix/store/ffffffffffffffffffffffffffffffff-x");
@@ -170,6 +174,7 @@ mod test {
     fn with_outputs() {
         use crate::Store;
         let store = crate::store::mock_store::MockStore::new();
+        let store = Arc::new(store);
 
         let path = format!("{}/{}!out,dev", super::STORE_PATH, DUMMY);
 

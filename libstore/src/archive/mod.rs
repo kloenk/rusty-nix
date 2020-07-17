@@ -357,8 +357,8 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let store = std::rc::Rc::new(store);
-        let mut box_store = store as std::rc::Rc<dyn WriteStore>;
+        let store = std::sync::Arc::new(store);
+        let box_store = Box::new(store.clone());
 
         // this is skipped in rustfmt to see packet boundings
         #[rustfmt::skip]
@@ -372,7 +372,7 @@ mod test {
              1, 0, 0, 0, 0, 0, 0, 0,  41,   0,   0,   0,   0,   0,   0,   0,
         ];
 
-        let mut parser = NarParser::new("/mock/string", &mut reader, store);
+        let mut parser = NarParser::new("/mock/string", &mut reader, box_store);
 
         let ret = parser.parse().await.unwrap();
 
@@ -390,7 +390,7 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let store = std::rc::Rc::new(store);
+        let store = std::sync::Arc::new(store);
 
         let mut reader: &[u8] = &[
             // created via `nix dump-path`
@@ -447,7 +447,7 @@ mod test {
             0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
 
-        let mut parser = NarParser::new("/mock/dir", &mut reader, store);
+        let mut parser = NarParser::new("/mock/dir", &mut reader, Box::new(store.clone()));
 
         println!("running parser");
         let ret = parser.parse().await.unwrap();

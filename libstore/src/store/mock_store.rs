@@ -65,7 +65,7 @@ impl MockStore {
     }
 }
 
-impl WriteStore for MockStore {
+impl WriteStore for Arc<MockStore> {
     fn write_file<'a>(
         &'a self,
         path: &'a str,
@@ -156,7 +156,7 @@ impl WriteStore for MockStore {
     }
 }
 
-impl ReadStore for MockStore {
+impl ReadStore for Arc<MockStore> {
     fn query_path_info<'a>(
         &'a self,
         path: &'a StorePath,
@@ -176,7 +176,7 @@ impl ReadStore for MockStore {
     }
 }
 
-impl Store for MockStore {
+impl Store for Arc<MockStore> {
     fn get_store_dir<'a>(&'a self) -> Result<String, StoreError> {
         Ok("/nix/store".to_string())
     }

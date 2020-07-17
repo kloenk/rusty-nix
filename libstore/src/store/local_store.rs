@@ -120,7 +120,7 @@ impl BuildStore for Arc<LocalStore> {
             self.prime_cache(&drvs).await?;
 
             warn!("unimplemented build_paths");
-            unimplemented!();
+            //unimplemented!(); // TODO: implement things
             Ok(())
         }))
     }
