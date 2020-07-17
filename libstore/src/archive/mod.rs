@@ -5,7 +5,7 @@ use futures::future::LocalFutureObj;
 use std::rc::Rc;
 
 pub use crate::error::NarError;
-use crate::{store::WriteStore, Store};
+use crate::{store::BuildStore, store::WriteStore, Store};
 
 pub use crate::store::Hash;
 
@@ -25,7 +25,7 @@ pub struct NarResult {
 pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
     reader: Mutex<&'a mut T>,
 
-    store: Rc<dyn WriteStore>,
+    store: Box<dyn WriteStore>, // TODO: use WriteStore here
 
     hasher: Mutex<Option<(ring::digest::Context, u64)>>,
 
@@ -33,7 +33,7 @@ pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
 }
 
 impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
-    pub fn new(base_path: &str, reader: &'a mut T, store: Rc<dyn WriteStore>) -> Self {
+    pub fn new(base_path: &str, reader: &'a mut T, store: Box<dyn WriteStore>) -> Self {
         Self {
             base_path: base_path.to_string(),
             hasher: Mutex::new(Some((ring::digest::Context::new(&ring::digest::SHA256), 0))), // TODO: other hashing algs

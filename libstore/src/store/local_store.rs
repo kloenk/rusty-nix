@@ -6,6 +6,7 @@ use log::*;
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
+use std::rc::Rc;
 
 use super::path::StorePathWithOutputs;
 use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
@@ -25,7 +26,7 @@ impl LocalStore {
     pub async fn open_store(
         path: &str,
         params: std::collections::HashMap<String, super::Param>,
-    ) -> Result<Self, crate::error::StoreError> {
+    ) -> Result<Arc<Self>, crate::error::StoreError> {
         // TODO: access checks?
         trace!("opening local store {}", path);
         trace!("got params: {:?}", params);
@@ -44,7 +45,7 @@ impl LocalStore {
 
         store.make_store_writable().await?;
 
-        Ok(store)
+        Ok(Arc::new(store))
     }
 
     #[cfg(target_os = "linux")]
@@ -105,7 +106,7 @@ impl LocalStore {
     }
 }
 
-impl BuildStore for LocalStore {
+impl BuildStore for Arc<LocalStore> {
     fn build_paths<'a>(
         &'a self,
         drvs: Vec<StorePathWithOutputs>,
@@ -133,7 +134,7 @@ impl BuildStore for LocalStore {
             let state = Arc::new(Mutex::new(super::MissingInfo::new()));
 
             /*let do_path = |path: &'a StorePathWithOutputs,
-                           state: Arc<Mutex<super::MissingInfo>>, store: &LocalStore| async move {
+                           state: Arc<Mutex<super::MissingInfo>>, store: Rc<LocalStore>| async move {
                 let mut state = state.lock().unwrap();
                 if state.done.contains(&path.path.name()) {
                     return Ok(());
@@ -161,14 +162,14 @@ impl BuildStore for LocalStore {
                 work.push(do_path(v, state.clone(), self));
             }
 
-            futures::future::join_all(work).await;
+            futures::future::join_all(work).await;*/
 
             warn!("unimplemented: LocalStore::query_missing");
             let libnfc = StorePath::new("05dxizl4i8w5k32x2kg3cxnim56cgvyy-libnfc-1.7.1.drv")?;
-            */
+
             let mut state: super::MissingInfo =
                 Arc::try_unwrap(state).unwrap().into_inner().unwrap();
-            //state.will_build.push(libnfc);
+            state.will_build.push(libnfc);
             Ok(state)
         }))
     }
@@ -178,7 +179,7 @@ impl BuildStore for LocalStore {
     }
 }
 
-impl WriteStore for LocalStore {
+impl WriteStore for Arc<LocalStore> {
     fn write_file<'a>(
         &'a self,
         path: &'a str,
@@ -460,7 +461,7 @@ impl WriteStore for LocalStore {
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         //let state_dir = self.get_state_dir();
         LocalFutureObj::new(Box::new(async move {
-            let state_dir = self.get_state_dir();
+            let state_dir = self.get_state_dir()?;
             let dirs = vec![
                 format!("{}/profiles/per-user/{}", &state_dir, username),
                 format!("{}/gcroots/per-user/{}", &state_dir, username),
@@ -491,7 +492,7 @@ impl WriteStore for LocalStore {
     }
 }
 
-impl ReadStore for LocalStore {
+impl ReadStore for Arc<LocalStore> {
     fn query_path_info<'a>(
         &'a self,
         path: &'a StorePath,
@@ -624,7 +625,7 @@ impl ReadStore for LocalStore {
     }
 }
 
-impl Store for LocalStore {
+impl Store for Arc<LocalStore> {
     fn get_state_dir<'a>(&'a self) -> Result<String, StoreError> {
         Ok(format!("{}/var/nix/", self.base_dir))
     }
