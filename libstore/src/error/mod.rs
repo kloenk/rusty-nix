@@ -33,6 +33,7 @@ custom_error! {
         InvalidHashPart{ path: String, hash_part: String } = "The path {path} does not have a valid hash part {hash_part}",
         InvalidDerivation{ msg: String } = "InvalidDerivation: {msg}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
+        BadBase32 = "Bad base 32 structure",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }

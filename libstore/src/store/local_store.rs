@@ -6,7 +6,7 @@ use log::*;
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
-use std::rc::Rc;
+use std::convert::TryFrom;
 
 use super::path::StorePathWithOutputs;
 use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
@@ -328,6 +328,7 @@ impl WriteStore for Arc<LocalStore> {
         }))
     }
 
+    // https://source.kloenk.de/github.com/NixOS/nix@2d6d53bc87ef7468ad73431cf76123316f4c82bf/-/blob/src/libstore/local-store.cc#L969
     fn add_to_store<'a>(
         &'a self,
         path: super::ValidPathInfo,
@@ -342,46 +343,24 @@ impl WriteStore for Arc<LocalStore> {
             }
             // TODO: return err if sig is missing
 
+            // lock file
+
             self.add_temp_root(&path.path).await?;
 
             if repair || !self.is_valid_path(&path.path).await? {
                 self.delete_path(&path.path);
 
-                /*if path.ca.is_some() {
-                    let ca = path.ca.unwrap();
-                    if !ca.starts_with("text:") && path.references.len() == 0 || path.references.len() == 0
+                // text hashing has long been allowed to have non-self-references because it is used for drv files.
+                /*if path.ca.is_some() && !(path.ca.unwrap().starts_with("text:") && path.references.len() == 0) || path.references.len() == 0 {
+                    unimplemented!("feature ca-refernces: {}/{}", file!(), line!());
                 }*/
 
-                //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
-                // requireFeature("ca-references")
+                /*let base_path = format!("{}/.temp/{}", self.get_store_dir()?, path.path);
+                let nar = crate::archive::NarParser::new(&base_path, source, self.box_clone_write());
+                let nar = nar.parse().await;
+                println!("nar: {:?}", nar);*/
 
-                //                self.registerValidPath(path).await?;
-
-                /* std::unique_ptr<AbstractHashSink> hashSink;
-                if (info.ca == "" || !info.references.count(info.path))
-                    hashSink = std::make_unique<HashSink>(htSHA256);
-                else
-                    hashSink = std::make_unique<HashModuloSink>(htSHA256, std::string(info.path.hashPart()));
-
-                LambdaSource wrapperSource([&](unsigned char * data, size_t len) -> size_t {
-                    size_t n = source.read(data, len);
-                    (*hashSink)(data, n);
-                    return n;
-                });
-
-                restorePath(realPath, wrapperSource);
-
-                auto hashResult = hashSink->finish();
-
-                if (hashResult.first != info.narHash)
-                    throw Error("hash mismatch importing path '%s';\n  wanted: %s\n  got:    %s",
-                        printStorePath(info.path), info.narHash.to_string(Base32, true), hashResult.first.to_string(Base32, true));
-
-                if (hashResult.second != info.narSize)
-                    throw Error("size mismatch importing path '%s';\n  wanted: %s\n  got:   %s",
-                        printStorePath(info.path), info.narSize, hashResult.second);
-
-                autoGC();
+                /*                autoGC();
 
                 canonicalisePathMetaData(realPath, -1);
 
@@ -582,7 +561,7 @@ impl ReadStore for Arc<LocalStore> {
                 let id: u64 = row.get::<usize, isize>(0)? as u64;
                 let nar_hash: crate::store::Hash = row
                     .get::<usize, String>(1)
-                    .map(|v| crate::store::Hash::from(v.as_str()))?;
+                    .map(|v| crate::store::Hash::from_sql_string(v.as_str()).unwrap())?;
                 let registration_time: chrono::NaiveDateTime = row
                     .get::<usize, isize>(2)
                     .map(|v| chrono::NaiveDateTime::from_timestamp(v as i64, 0))?;

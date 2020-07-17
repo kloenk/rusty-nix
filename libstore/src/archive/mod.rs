@@ -17,6 +17,7 @@ use std::sync::Mutex;
 pub const NAR_VERSION_MAGIC_1: &'static str = "nix-archive-1";
 
 /// Returned as succesfully parsed nar archive
+#[derive(Debug)]
 pub struct NarResult {
     pub hash: Hash,
     pub len: u64,
