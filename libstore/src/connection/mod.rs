@@ -378,7 +378,13 @@ impl<'a> Connection<'a> {
         let suffix = self.read_string().await?;
         let s = self.read_os_string().await?;
 
-        let refs = self.read_strings().await?;
+        let refs: Result<crate::store::path::StorePaths, StoreError> = self
+            .read_strings()
+            .await?
+            .into_iter()
+            .map(|v| self.store.parse_store_path(&v))
+            .collect();
+        let refs = refs?;
 
         self.logger.start_work().await?;
         let path = self
@@ -454,16 +460,20 @@ impl<'a> Connection<'a> {
         drop(reader);
 
         let hash_compressed = parser.hash.clone();
-        let hash_compressed = hash_compressed.compress_hash(20)?;
-        let result = super::store::path::StorePath::new_hash(hash_compressed, path)?;
-        /*let result = format!(
-            "{}/{}-{}",
-            self.store.get_store_dir()?,
-            hash_compressed,
-            path
-        )
-        .replace("//", "/"); // TODO: make cleaner
-        //let result = result.canonicalize()?;*/
+        //let hash_compressed = hash_compressed.compress_hash(20)?;
+        //let result = super::store::path::StorePath::new_hash(hash_compressed, path)?;
+        let result = self
+            .store
+            .make_fixed_output_path(
+                crate::store::FileIngestionMethod::Recursive,
+                &hash_compressed,
+                path,
+                &Vec::new(),
+                false,
+            )
+            .await?;
+
+        self.store.add_temp_root(&result).await?;
 
         //std::fs::remove_dir_all(&result);
         self.store.delete_path(&result).await?;

@@ -107,7 +107,7 @@ pub trait WriteStore: ReadStore + Store {
         &'a self,
         suffix: &'a str,
         data: &'a [u8],
-        refs: &'a Vec<String>,
+        refs: &'a path::StorePaths,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>>;
 
@@ -172,7 +172,7 @@ pub trait ReadStore: Store {
         &'a self,
         suffix: &'a str,
         hash: &'a Hash,
-        refs: &'a Vec<String>,
+        refs: &'a path::StorePaths,
     ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             if !hash.is_sha256() {
@@ -185,11 +185,29 @@ pub trait ReadStore: Store {
         }))
     }
 
-    fn make_type(&self, path_type: &str, refs: &Vec<String>, has_self_ref: bool) -> String {
+    fn make_fixed_output_path<'a>(
+        &'a self,
+        methode: FileIngestionMethod,
+        hash: &'a Hash,
+        name: &'a str,
+        refs: &'a path::StorePaths,
+        has_self_ref: bool,
+    ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if hash.is_sha256() && methode == FileIngestionMethod::Recursive {
+                self.make_store_path(&self.make_type("source", refs, has_self_ref), hash, name)
+                    .await
+            } else {
+                unimplemented!("non recursive non sha256 fixed output");
+            }
+        }))
+    }
+
+    fn make_type(&self, path_type: &str, refs: &path::StorePaths, has_self_ref: bool) -> String {
         let mut res = String::from(path_type);
         for v in refs {
             res.push(':');
-            res.push_str(v); // TODO: use self.printStorePath?
+            res.push_str(&self.print_store_path(v)); // TODO: use self.printStorePath?
         }
         if has_self_ref {
             res.push_str(":self");
@@ -204,7 +222,6 @@ pub trait ReadStore: Store {
         hash: &'a Hash,
         name: &'a str,
     ) -> LocalFutureObj<'a, Result<StorePath, StoreError>> {
-        // TODO: ValidPath as result?
         LocalFutureObj::new(Box::new(async move {
             let s = format!(
                 "{}:{}:{}:{}",
@@ -213,12 +230,13 @@ pub trait ReadStore: Store {
                 self.get_store_dir()?,
                 name
             ); // TODO: remove sha256
+            trace!("store path hasher string is: '{}'", s);
             let hash = Hash::hash_string(&s)?;
             let hash = hash.compress_hash(20)?;
 
             //let s = format!("{}/{}-{}", self.get_store_dir()?, hash, name);
 
-            Ok(StorePath::new(&format!("{}-{}", hash, name))?)
+            Ok(StorePath::new(&format!("{}-{}", hash.to_base32()?, name))?)
         }))
     }
 
@@ -297,7 +315,7 @@ pub async fn open_store(
     v.display().to_string()
 }*/
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FileIngestionMethod {
     Flat = 0,

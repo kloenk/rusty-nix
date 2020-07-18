@@ -38,6 +38,10 @@ impl Hash {
                 let v = data_encoding::BASE32.encode(v);
                 Ok(v)
             }
+            Hash::Compressed(v) => {
+                let v = base32::encode(v);
+                Ok(v)
+            }
             _ => Err(StoreError::BadArchive {
                 msg: "base32 error".to_string(),
             }), // TODO: better error type
@@ -64,7 +68,10 @@ impl Hash {
         // TODO: return StoreError for none?
         match self {
             Hash::SHA256(v) => format!("sha256:{}", data_encoding::HEXLOWER.encode(v)),
-            _ => "unsuported".to_string(),
+            _ => {
+                panic!("unsupported hash type");
+                "unsuported".to_string()
+            }
         }
     }
 
