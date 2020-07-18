@@ -358,7 +358,7 @@ impl<'a> Connection<'a> {
 
         self.logger.start_work().await?;
 
-        let hash = self.parse_dump(&base_name).await?;
+        let hash = self.parse_dump(&base_name, methode).await?;
         // TODO: move path into store
         // How is the Hash calculated? from fixed output?
         warn!("get hash");
@@ -435,6 +435,7 @@ impl<'a> Connection<'a> {
     pub async fn parse_dump(
         &mut self,
         path: &str,
+        methode: super::store::FileIngestionMethod,
     ) -> Result<super::store::ValidPathInfo, StoreError> {
         use super::store::ValidPathInfo;
 
@@ -464,13 +465,7 @@ impl<'a> Connection<'a> {
         //let result = super::store::path::StorePath::new_hash(hash_compressed, path)?;
         let result = self
             .store
-            .make_fixed_output_path(
-                crate::store::FileIngestionMethod::Recursive,
-                &hash_compressed,
-                path,
-                &Vec::new(),
-                false,
-            )
+            .make_fixed_output_path(methode, &hash_compressed, path, &Vec::new(), false)
             .await?;
 
         self.store.add_temp_root(&result).await?;

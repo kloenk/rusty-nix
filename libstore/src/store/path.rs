@@ -45,7 +45,7 @@ impl StorePath {
     }
 
     pub fn new_hash(hash: super::Hash, name: &str) -> Result<Self, StoreError> {
-        Self::new(&format!("{}-{}", hash, name))
+        Self::new(&format!("{}-{}", hash.to_base32()?, name))
     }
 
     pub fn is_derivation(&self) -> bool {

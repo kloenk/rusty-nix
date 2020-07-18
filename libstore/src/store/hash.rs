@@ -113,11 +113,14 @@ impl Hash {
         let ht_pos = ht.len() - 4;
         let ht = ht[ht_pos];
         match ht {
-            "sha256" => Hash::from_sha256_vec(
-                ring::digest::digest(&ring::digest::SHA256, s.as_bytes()).as_ref(),
-            ),
+            "sha256" => Hash::hash_string_sha256(s),
             _ => unimplemented!("not sha256"),
         }
+    }
+
+    pub fn hash_string_sha256(s: &str) -> Result<Hash, StoreError> {
+        trace!("hashing: '{}'", s);
+        Hash::from_sha256_vec(ring::digest::digest(&ring::digest::SHA256, s.as_bytes()).as_ref())
     }
 }
 

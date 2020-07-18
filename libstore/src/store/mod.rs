@@ -198,7 +198,17 @@ pub trait ReadStore: Store {
                 self.make_store_path(&self.make_type("source", refs, has_self_ref), hash, name)
                     .await
             } else {
-                unimplemented!("non recursive non sha256 fixed output");
+                assert!(refs.is_empty()); // TODO: use own assert to not panic
+                let hash_2 = Hash::hash_string_sha256(&format!(
+                    "fixed:out:{}{}:",
+                    if methode == FileIngestionMethod::Recursive {
+                        "r:"
+                    } else {
+                        ""
+                    },
+                    hash.to_sql_string()
+                ))?;
+                self.make_store_path("output:out", &hash_2, name).await
             }
         }))
     }
@@ -236,7 +246,8 @@ pub trait ReadStore: Store {
 
             //let s = format!("{}/{}-{}", self.get_store_dir()?, hash, name);
 
-            Ok(StorePath::new(&format!("{}-{}", hash.to_base32()?, name))?)
+            //Ok(StorePath::new(&format!("{}-{}", hash.to_base32()?, name))?)
+            Ok(StorePath::new_hash(hash, name)?)
         }))
     }
 
