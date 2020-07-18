@@ -334,8 +334,10 @@ impl WriteStore for Arc<LocalStore> {
         path: super::ValidPathInfo,
         repair: bool,
         check_sigs: bool,
+        reader: &'a mut (dyn tokio::io::AsyncRead + Unpin),
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
+            use tokio::io::AsyncReadExt;
             if let super::Hash::None = path.nar_hash {
                 return Err(StoreError::MissingHash {
                     path: self.print_store_path(&path.path),
@@ -343,6 +345,9 @@ impl WriteStore for Arc<LocalStore> {
             }
             // TODO: return err if sig is missing
 
+            let mut dest = String::new();
+            reader.read_to_string(&mut dest).await?;
+            println!("string: {}", dest);
             // lock file
 
             self.add_temp_root(&path.path).await?;

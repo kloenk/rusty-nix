@@ -331,8 +331,17 @@ impl<'a> Connection<'a> {
 
         self.logger.start_work().await?;
 
+        self.write_u64(0x64617461).await?;
+        self.write_u64(20).await?;
+
+        let mut reader = self.reader.write().unwrap();
         self.store
-            .add_to_store(path, /*source,*/ repair, !dont_check_sigs)
+            .add_to_store(
+                path,
+                /*source,*/ repair,
+                !dont_check_sigs,
+                &mut (*reader),
+            )
             .await?;
         self.logger.stop_work(logger::WORKDONE).await?;
 
