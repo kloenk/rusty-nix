@@ -7,6 +7,8 @@ pub mod crypto;
 
 pub mod archive;
 
+pub mod reader;
+
 pub mod build;
 
 pub mod gc;
