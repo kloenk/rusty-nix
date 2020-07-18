@@ -136,7 +136,7 @@ impl WriteStore for Arc<MockStore> {
         &'a self,
         suffix: &'a str,
         data: &'a [u8],
-        refs: &'a Vec<String>,
+        refs: &'a super::path::StorePaths,
         repair: bool,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
         unimplemented!()

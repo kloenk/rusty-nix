@@ -189,14 +189,11 @@ mod test {
 
     #[test]
     fn compress_hash() {
-        //let hash_1 = Hash::from_sha256("sha256:1yh3wfhqrgm27n60qbfdgmyv00z3bwvs8bcmy233cgqy2rq2s19r").unwrap();
-        //let hash_1 = Hash::from("");
         let hash_1 =
             Hash::try_from("sha256:1yh3wfhqrgm27n60qbfdgmyv00z3bwvs8bcmy233cgqy2rq2s19r").unwrap();
         let hash_1 = hash_1.compress_hash(20).unwrap();
         let hash_1 = hash_1.to_string();
 
-        //let hash_2 = Hash::from_sha256("3fh74ifmxzsh879f800gldgsmqz3f2zy").unwrap();
         let hash_2 = "gmyv00z3bwvs9mwn2ckvm0dw5gy22a7l";
         assert_eq!(hash_1, hash_2);
     }
