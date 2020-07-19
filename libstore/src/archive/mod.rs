@@ -1,11 +1,12 @@
 use byteorder::{ByteOrder, LittleEndian};
-use tokio::io::{AsyncRead, AsyncReadExt};
+//use tokio::io::{AsyncRead, AsyncReadExt};
 
 use futures::future::LocalFutureObj;
 use std::rc::Rc;
 
 pub use crate::error::NarError;
 use crate::{store::BuildStore, store::WriteStore, Store};
+use crate::reader::AsyncRead;
 
 pub use crate::store::Hash;
 
@@ -19,33 +20,28 @@ pub const NAR_VERSION_MAGIC_1: &'static str = "nix-archive-1";
 /// Returned as succesfully parsed nar archive
 #[derive(Debug)]
 pub struct NarResult {
-    pub hash: Hash,
-    pub len: u64,
 }
 
 pub struct NarParser<'a, T: ?Sized + AsyncRead + Unpin> {
-    reader: Mutex<&'a mut T>,
+    reader: &'a T,
 
     store: Box<dyn WriteStore>, // TODO: use WriteStore here
-
-    hasher: Mutex<Option<(ring::digest::Context, u64)>>,
 
     pub base_path: String,
 }
 
 impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
-    pub fn new(base_path: &str, reader: &'a mut T, store: Box<dyn WriteStore>) -> Self {
+    pub fn new(base_path: &str, reader: &'a T, store: Box<dyn WriteStore>) -> Self {
         Self {
             base_path: base_path.to_string(),
-            hasher: Mutex::new(Some((ring::digest::Context::new(&ring::digest::SHA256), 0))), // TODO: other hashing algs
-            reader: Mutex::new(reader),
+            reader: reader,
             store,
         }
     }
 
     pub async fn parse(&'a self) -> Result<NarResult, NarError> {
         trace!("starting parsing of nar for path {}", self.base_path);
-        let version = self.read_string().await?;
+        let version = self.reader.read_string().await?;
         debug!("got nar with version: '{}'", version);
         if version != NAR_VERSION_MAGIC_1 {
             return Err(NarError::NotAArchive {});
@@ -53,20 +49,15 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
 
         self.inner_parser(self.base_path.to_owned()).await.await?;
 
-        let (hasher, len) = self.hasher.lock().unwrap().take().unwrap();
-        let hash = hasher.finish();
-        let hash = Hash::from_sha256_vec(hash.as_ref())?;
 
         Ok(NarResult {
             // TODO: fix
-            len,
-            hash,
         })
     }
 
     pub async fn inner_parser(&'a self, path: String) -> LocalFutureObj<'a, Result<(), NarError>> {
         LocalFutureObj::new(Box::new(async move {
-            let tag = self.read_string().await?;
+            let tag = self.reader.read_string().await?;
             if tag != "(" {
                 return Err(NarError::MissingOpenTag {});
             }
@@ -75,12 +66,12 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
             let mut state = State::None;
 
             loop {
-                let s = self.read_string().await?;
+                let s = self.reader.read_string().await?;
 
                 if s == ")" {
                     break;
                 } else if s == "type" {
-                    let t = self.read_string().await?;
+                    let t = self.reader.read_string().await?;
                     if f_type != Type::Unknown {
                         return Err(NarError::MultipleTypeFieleds {});
                     }
@@ -98,11 +89,11 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             State::None // state not needed here
                         }
                         Type::Symlink => {
-                            let target = self.read_string().await?;
+                            let target = self.reader.read_string().await?;
                             if target != "target" {
                                 return Err(NarError::InvalidSymlinkMarker { marker: target });
                             }
-                            let target = self.read_string().await?;
+                            let target = self.reader.read_string().await?;
                             debug!("creating symlink: '{} -> {}'", path, target);
                             self.store.make_symlink(&path, &target).await?;
                             State::None // state not needed here
@@ -112,18 +103,18 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                     match &state {
                         State::File(v) => {
                             self.store
-                                .write_file(&v, &self.read_os_string().await?, false)
+                                .write_file(&v, &self.reader.read_os_string().await?, false)
                                 .await?
                         }
                         State::Executable(v) => {
                             self.store
-                                .write_file(&v, &self.read_os_string().await?, true)
+                                .write_file(&v, &self.reader.read_os_string().await?, true)
                                 .await?
                         }
                         _ => return Err(NarError::InvalidState { state: state }),
                     }
                 } else if s == "executable" {
-                    let s = self.read_string().await?;
+                    let s = self.reader.read_string().await?;
                     if s != "" {
                         return Err(NarError::InvalidExecutableMarker {});
                     }
@@ -135,16 +126,16 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                     let mut name = String::new();
                     let mut prev_name = String::new();
 
-                    let s = self.read_string().await?;
+                    let s = self.reader.read_string().await?;
                     if s != "(" {
                         return Err(NarError::MissingOpenTag {});
                     }
                     loop {
-                        let s = self.read_string().await?;
+                        let s = self.reader.read_string().await?;
                         if s == ")" {
                             break;
                         } else if s == "name" {
-                            name = self.read_string().await?;
+                            name = self.reader.read_string().await?;
                             if name.len() == 0
                                 || name == "."
                                 || name == ".."
@@ -170,101 +161,13 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                     }
                     trace!("exit node loop")
                 } else {
-                    let v = self.read_string().await?;
+                    let v = self.reader.read_string().await?;
                     unimplemented!("what am I doing?: {}", v);
                 }
             }
             trace!("finished parsing of '{}'", path);
             Ok(())
         }))
-    }
-
-    // TODO: make all these to a trait somehow
-    async fn read_int(&'a self) -> Result<u64, io::Error> {
-        let mut buf: [u8; 8] = [0; 8];
-
-        let mut reader = self.reader.lock().unwrap();
-        reader.read_exact(&mut buf).await?;
-        self.hash(&buf);
-
-        // update_hasher
-
-        Ok(LittleEndian::read_u64(&buf))
-    }
-
-    async fn read_os_string(&'a self) -> Result<Vec<u8>, NarError> {
-        let mut len = self.read_int().await?; // Borrow checker fails here, so will inline this function
-                                              /*let mut len = {
-                                                  let mut buf: [u8; 8] = [0; 8];
-                                                  self.reader.read_exact(&mut buf).await?;
-                                                  LittleEndian::read_u64(&buf)
-                                              };*/
-
-        let mut buf: [u8; 1024] = [0; 1024];
-        let mut value = Vec::new();
-        let mut reader = self.reader.lock().unwrap();
-
-        while len > 1024 {
-            reader.read_exact(&mut buf).await?;
-            value.extend_from_slice(&buf);
-            len = len - 1024;
-        }
-
-        reader.read_exact(&mut buf[..len as usize]).await?;
-        value.extend_from_slice(&buf[..len as usize]);
-
-        drop(reader);
-
-        self.hash(&value);
-
-        // update_hasher
-        self.read_padding(len).await?;
-
-        Ok(value)
-    }
-
-    async fn read_string(&'a self) -> Result<String, NarError> {
-        trace!("read string");
-        Ok(String::from_utf8_lossy(&self.read_os_string().await?).to_string())
-    }
-
-    /*async fn read_strings(&'a self) -> Result<Vec<String>, NarError> {
-        trace!("read strings");
-        let len = self.read_int().await?; // borrow checker fails
-
-        let mut vec = Vec::with_capacity(len as usize);
-        for v in 0..len {
-            vec.push(self.read_string().await?);
-        }
-
-        Ok(vec)
-    }*/
-
-    async fn read_padding(&'a self, len: u64) -> Result<(), NarError> {
-        trace!("read padding");
-        if len % 8 != 0 {
-            let mut buf: [u8; 8] = [0; 8];
-            let len = 8 - (len % 8) as usize;
-            trace!("read {} padding", len);
-
-            let mut reader = self.reader.lock().unwrap();
-            reader.read_exact(&mut buf[..len]).await?;
-            self.hash(&buf[..len]);
-            // TODO: check for non 0
-        }
-        trace!("end of read padding");
-        Ok(())
-    }
-
-    fn hash(&'a self, data: &[u8]) {
-        let mut hasher = self.hasher.lock().unwrap();
-        if let Some((hasher, len)) = &mut *hasher {
-            hasher.update(data);
-            *len += data.len() as u64;
-        }
-        //if let Some((&mut hasher, &mut len)) = *self.hasher.lock().unwrap() {
-
-        //}
     }
 }
 
@@ -447,6 +350,7 @@ mod test {
             0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00,
             0x00, 0x00, 0x00, 0x00, 0x29, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         ];
+        let reader = crate::reader::test::Connection::new(reader, false);
 
         let mut parser = NarParser::new("/mock/dir", &mut reader, Box::new(store.clone()));
 

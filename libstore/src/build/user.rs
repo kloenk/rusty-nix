@@ -87,7 +87,7 @@ impl UserLock {
 
     #[cfg(not(target_os = "linux"))]
     fn get_supplementary_gids(_user: &nix::unistd::User) -> std::io::Result<Vec<libc::gid_t>> {
-        Vec::new()
+        Ok(Vec::new())
     }
 
     pub fn get_uid(&self) -> uid_t {

@@ -425,6 +425,11 @@ fn default_system_features() -> Vec<String> {
     vec
 }
 
+#[cfg(not(any(target_os = "linux")))]
+fn default_system_features() -> Vec<String> {
+    vec![]
+}
+
 struct Deserializer<'de> {
     input: &'de str,
 }
