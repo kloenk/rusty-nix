@@ -88,6 +88,8 @@ pub trait AsyncRead {
     }
 }
 
+type EmtyResult = Result<(), std::io::Error>;
+
 pub trait AsyncWrite {
     fn write<'a>(&'a self, buf: &'a [u8]) -> LocalFutureObj<'a, Result<usize, std::io::Error>>;
 
@@ -101,9 +103,54 @@ pub trait AsyncWrite {
             Ok(())
         }))
     }
+
+    fn write_bool<'a>(&'a self, v: bool) -> LocalFutureObj<'a, EmtyResult> {
+        self.write_u64(v as u64)
+    }
+
+    fn write_string<'a>(&'a self, str: &'a str) -> LocalFutureObj<'a, EmtyResult> {
+        LocalFutureObj::new(Box::new(async move {
+            self.write_u64(str.len() as u64).await?;
+
+            let v = self.write(str.as_bytes()).await?;
+            ieieo(v, str.len())?;
+
+            self.write_padding(str.len()).await?;
+
+            Ok(())
+        }))
+    }
+
+    fn write_padding<'a>(&'a self, len: usize) -> LocalFutureObj<'a, EmtyResult> {
+        LocalFutureObj::new(Box::new(async move {
+            if len % 8 != 0 {
+                let len = 8 - (len % 8);
+                let mut buf = Vec::with_capacity(len);
+                buf.resize(len, 0);
+
+                let v = self.write(buf.as_slice()).await?;
+                ieieo(v, len)?;
+            }
+
+            Ok(())
+        }))
+    }
+
+    fn write_strings<'a>(&'a self, v: &'a Vec<String>) -> LocalFutureObj<'a, EmtyResult> {
+        LocalFutureObj::new(Box::new(async move {
+            self.write_u64(v.len() as u64).await?;
+
+            for v in v {
+                self.write_string(v).await?;
+            }
+
+            Ok(())
+        }))
+    }
 }
 
 #[inline(always)]
+// TODO: make as macro
 fn ieieo(act: usize, expt: usize) -> Result<(), std::io::Error> {
     if act != expt {
         return Err(std::io::Error::from_raw_os_error(libc::EIO));
@@ -114,6 +161,19 @@ fn ieieo(act: usize, expt: usize) -> Result<(), std::io::Error> {
 pub struct Connection<'a> {
     reader: Arc<Mutex<ReadHalf<'a>>>,
     writer: Arc<Mutex<WriteHalf<'a>>>,
+}
+
+impl<'b> Connection<'b> {
+    pub fn new(reader: ReadHalf<'b>, writer: WriteHalf<'b>) -> Self {
+        Self {
+            reader: Arc::new(Mutex::new(reader)),
+            writer: Arc::new(Mutex::new(writer)),
+        }
+    }
+
+    pub fn new_arc(reader: Arc<Mutex<ReadHalf<'b>>>, writer: Arc<Mutex<WriteHalf<'b>>>) -> Self {
+        Self { reader, writer }
+    }
 }
 
 impl<'b> AsyncRead for Connection<'b> {
@@ -131,6 +191,16 @@ impl<'b> AsyncRead for Connection<'b> {
 
             let mut reader = self.reader.lock().unwrap();
             Ok(reader.read_exact(&mut buf[0..len]).await?)
+        }))
+    }
+}
+
+impl<'b> AsyncWrite for Connection<'b> {
+    fn write<'a>(&'a self, buf: &'a [u8]) -> LocalFutureObj<'a, Result<usize, std::io::Error>> {
+        LocalFutureObj::new(Box::new(async move {
+            use tokio::io::AsyncWriteExt;
+            let mut writer = self.writer.lock().unwrap(); // TODO: return EBUSSY
+            Ok(writer.write(buf).await?)
         }))
     }
 }

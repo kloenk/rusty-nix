@@ -17,11 +17,11 @@
       commondDeps = pkgs: {
         buildDeps = with pkgs;
           [
-
+            sqlite
             # TODO: tests
           ];
 
-        propBuildDeps = with pkgs; [ sqlite ];
+        propBuildDeps = with pkgs; [ ];
       };
 
       version = "0.1.0"; # TODO: version managemant
