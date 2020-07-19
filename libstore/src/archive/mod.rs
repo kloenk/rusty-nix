@@ -5,7 +5,7 @@ use futures::future::LocalFutureObj;
 use std::rc::Rc;
 
 pub use crate::error::NarError;
-use crate::reader::AsyncRead;
+use crate::source::AsyncRead;
 use crate::{store::BuildStore, store::WriteStore, Store};
 
 pub use crate::store::Hash;
@@ -246,7 +246,7 @@ pub fn make_str_from_data(data: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod test {
     use super::{NarError, NarParser};
-    use crate::reader::{test::Connection, AsyncRead};
+    use crate::source::{test::Connection, AsyncRead};
     use crate::store::mock_store::MockStore;
     use crate::store::{ReadStore, Store, StoreError, WriteStore};
     use env_logger;

@@ -10,7 +10,11 @@ use futures::future::LocalFutureObj;
 /// These are exported, because there are needed for async traits
 use std::boxed::Box;
 
-// TODO: add logger trait for logging
+mod logger;
+pub use logger::{Logger, WorkFinish, STDERR};
+
+/// Shortcut for `WorkFinish::Done`
+pub const WORKDONE: WorkFinish = WorkFinish::Done;
 
 pub trait AsyncRead {
     fn read_exact<'a>(
@@ -90,8 +94,9 @@ pub trait AsyncRead {
     }
 }
 
-type EmtyResult = Result<(), std::io::Error>;
+type EmptyResult = Result<(), std::io::Error>;
 
+// TODO: flush?
 pub trait AsyncWrite {
     fn write<'a>(&'a self, buf: &'a [u8]) -> LocalFutureObj<'a, Result<usize, std::io::Error>>;
 
@@ -106,11 +111,11 @@ pub trait AsyncWrite {
         }))
     }
 
-    fn write_bool<'a>(&'a self, v: bool) -> LocalFutureObj<'a, EmtyResult> {
+    fn write_bool<'a>(&'a self, v: bool) -> LocalFutureObj<'a, EmptyResult> {
         self.write_u64(v as u64)
     }
 
-    fn write_string<'a>(&'a self, str: &'a str) -> LocalFutureObj<'a, EmtyResult> {
+    fn write_string<'a>(&'a self, str: &'a str) -> LocalFutureObj<'a, EmptyResult> {
         LocalFutureObj::new(Box::new(async move {
             self.write_u64(str.len() as u64).await?;
 
@@ -123,7 +128,7 @@ pub trait AsyncWrite {
         }))
     }
 
-    fn write_padding<'a>(&'a self, len: usize) -> LocalFutureObj<'a, EmtyResult> {
+    fn write_padding<'a>(&'a self, len: usize) -> LocalFutureObj<'a, EmptyResult> {
         LocalFutureObj::new(Box::new(async move {
             if len % 8 != 0 {
                 let len = 8 - (len % 8);
@@ -138,7 +143,7 @@ pub trait AsyncWrite {
         }))
     }
 
-    fn write_strings<'a>(&'a self, v: &'a Vec<String>) -> LocalFutureObj<'a, EmtyResult> {
+    fn write_strings<'a>(&'a self, v: &'a Vec<String>) -> LocalFutureObj<'a, EmptyResult> {
         LocalFutureObj::new(Box::new(async move {
             self.write_u64(v.len() as u64).await?;
 
@@ -170,6 +175,10 @@ pub struct Connection<'a> {
     pub reader: Arc<Mutex<ReadHalf<'a>>>,
     pub writer: Arc<Mutex<WriteHalf<'a>>>,
     pub hasher: Arc<Mutex<Option<(usize, ring::digest::Context)>>>,
+
+    // logger types
+    pub can_send: Arc<std::sync::atomic::AtomicBool>,
+    pub pending_msgs: Arc<Mutex<Vec<String>>>,
 }
 
 impl<'b> Connection<'b> {
@@ -178,6 +187,9 @@ impl<'b> Connection<'b> {
             reader: Arc::new(Mutex::new(reader)),
             writer: Arc::new(Mutex::new(writer)),
             hasher: Arc::new(Mutex::new(None)),
+
+            can_send: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pending_msgs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -186,6 +198,9 @@ impl<'b> Connection<'b> {
             reader,
             writer,
             hasher: Arc::new(Mutex::new(None)),
+
+            can_send: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            pending_msgs: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -257,6 +272,30 @@ impl<'b> AsyncWrite for Connection<'b> {
             let mut writer = self.writer.lock().unwrap(); // TODO: return EBUSSY
             Ok(writer.write(buf).await?)
         }))
+    }
+}
+
+use std::sync::atomic::Ordering;
+impl<'b> Logger for Connection<'b> {
+    fn can_send(&self) -> bool {
+        self.can_send.load(Ordering::Relaxed)
+    }
+
+    fn set_can_send(&self, can: bool) {
+        self.can_send.store(can, Ordering::Relaxed)
+    }
+
+    fn enqueu(&self, msg: String) {
+        let mut queu = self.pending_msgs.lock().unwrap();
+        queu.push(msg);
+    }
+
+    fn dequeu(&self) -> Vec<String> {
+        let mut queu = self.pending_msgs.lock().unwrap();
+        let ret = queu.clone();
+        queu.clear();
+
+        ret
     }
 }
 
@@ -390,4 +429,6 @@ pub(crate) mod test {
         let vec: Vec<u8> = vec![2, 0, 0, 0, 0, 0, 0, 0];
         assert_eq!(writer.get_ref(), &vec);
     }
+
+    // TODO: logger tests
 }
