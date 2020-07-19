@@ -10,6 +10,8 @@ use futures::future::LocalFutureObj;
 /// These are exported, because there are needed for async traits
 use std::boxed::Box;
 
+// TODO: add logger trait for logging
+
 pub trait AsyncRead {
     fn read_exact<'a>(
         &'a self,
@@ -158,9 +160,10 @@ fn ieieo(act: usize, expt: usize) -> Result<(), std::io::Error> {
     Ok(())
 }
 
+#[derive(Debug, Clone)]
 pub struct Connection<'a> {
-    reader: Arc<Mutex<ReadHalf<'a>>>,
-    writer: Arc<Mutex<WriteHalf<'a>>>,
+    pub reader: Arc<Mutex<ReadHalf<'a>>>,
+    pub writer: Arc<Mutex<WriteHalf<'a>>>,
 }
 
 impl<'b> Connection<'b> {

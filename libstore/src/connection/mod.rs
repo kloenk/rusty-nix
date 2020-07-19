@@ -8,11 +8,12 @@ use log::*;
 #[allow(unused_imports)]
 use futures::future::LocalFutureObj;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+//use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::unix::{ReadHalf, WriteHalf};
 use tokio::net::UnixStream;
 
 use crate::error::StoreError;
+use crate::reader::{AsyncRead, AsyncWrite};
 type EmptyResult = Result<(), StoreError>;
 
 pub const WORKER_MAGIC_1: u32 = 0x6e697863;
@@ -68,8 +69,9 @@ pub struct Connection<'a> {
 
     logger: logger::TunnelLogger<'a>,
 
-    writer: Arc<RwLock<WriteHalf<'a>>>,
-    reader: Arc<RwLock<ReadHalf<'a>>>,
+    //writer: Arc<RwLock<WriteHalf<'a>>>,
+    //reader: Arc<RwLock<ReadHalf<'a>>>,
+    con: crate::reader::Connection<'a>,
 
     hasher: RwLock<Option<(ring::digest::Context, usize)>>,
 
@@ -89,17 +91,19 @@ impl<'a> Connection<'a> {
         u_name: String,
     ) -> Self {
         let (reader, writer) = stream.split();
-        let reader = Arc::new(RwLock::new(reader));
-        let writer = Arc::new(RwLock::new(writer));
+        //let reader = Arc::new(RwLock::new(reader));
+        //let writer = Arc::new(RwLock::new(writer));
+        let con = crate::reader::Connection::new(reader, writer);
 
         let hasher = RwLock::new(None);
 
-        let logger = logger::TunnelLogger::new(client_version, writer.clone());
+        let logger = logger::TunnelLogger::new(client_version, con.writer.clone());
         Self {
             trusted,
             logger,
-            reader,
-            writer,
+            //reader,
+            //writer,
+            con,
             hasher,
             store,
             uid,
@@ -117,7 +121,7 @@ impl<'a> Connection<'a> {
 
         loop {
             // daemon loop
-            let command = self.read_int().await?;
+            let command = self.con.read_u64().await?;
 
             // let command = Command::from(command);
             let command = crate::store::protocol::WorkerOp::from(command as u32);
@@ -154,25 +158,26 @@ impl<'a> Connection<'a> {
     async fn set_options(&mut self) -> EmptyResult {
         let mut settings = ClientSettings::new();
 
-        settings.keep_failed = self.read_int().await? != 0;
-        settings.keep_going = self.read_int().await? != 0;
-        settings.try_fallback = self.read_int().await? != 0;
-        settings.verbosity = crate::store::protocol::Verbosity::from(self.read_int().await? as u32);
-        settings.max_build_jobs = self.read_int().await? as u32;
-        settings.max_silent_time = self.read_int().await? as u32;
-        self.read_int().await?; // obsolete: useBuildHook
-        self.read_int().await?; // FIXME: verbose build
-        self.read_int().await?; // obsolete: logType
-        self.read_int().await?; // obsolete: printBuildTrace
-        settings.build_cores = self.read_int().await? as u32;
-        settings.use_substitutes = self.read_int().await? != 0;
+        settings.keep_failed = self.con.read_u64().await? != 0;
+        settings.keep_going = self.con.read_u64().await? != 0;
+        settings.try_fallback = self.con.read_u64().await? != 0;
+        settings.verbosity =
+            crate::store::protocol::Verbosity::from(self.con.read_u64().await? as u32);
+        settings.max_build_jobs = self.con.read_u64().await? as u32;
+        settings.max_silent_time = self.con.read_u64().await? as u32;
+        self.con.read_u64().await?; // obsolete: useBuildHook
+        self.con.read_u64().await?; // FIXME: verbose build
+        self.con.read_u64().await?; // obsolete: logType
+        self.con.read_u64().await?; // obsolete: printBuildTrace
+        settings.build_cores = self.con.read_u64().await? as u32;
+        settings.use_substitutes = self.con.read_u64().await? != 0;
 
         // TODO: check for client version >= 12
-        let n = self.read_int().await?;
+        let n = self.con.read_u64().await?;
         trace!("{} extra options", n);
         for _i in 0..n {
-            let name = self.read_string().await?;
-            let value = self.read_string().await?;
+            let name = self.con.read_string().await?;
+            let value = self.con.read_string().await?;
             settings.overrides.insert(name, Data::String(value));
             warn!("set options not yet fully implemented");
         }
@@ -186,7 +191,7 @@ impl<'a> Connection<'a> {
     }
 
     async fn query_path_info(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         let path = self.store.parse_store_path(&path)?;
         debug!("queriying path info for {}", path);
         self.logger.start_work().await?;
@@ -196,37 +201,43 @@ impl<'a> Connection<'a> {
         match info {
             Err(e) => {
                 trace!("no path info: {}", e);
-                let mut writer = self.writer.write().unwrap();
-                let buf: [u8; 8] = [0; 8];
-                writer.write(&buf).await?;
-                drop(writer);
+                //let mut writer = self.writer.write().unwrap();
+                //let buf: [u8; 8] = [0; 8];
+                //writer.write(&buf).await?;
+                //drop(writer);
+                self.con.write_u64(0).await?;
             }
             Ok(v) => {
-                self.write_u64(1).await?;
+                self.con.write_u64(1).await?;
                 if let Some(v) = v.deriver {
-                    self.write_string(&self.store.print_store_path(&v)).await?;
+                    self.con
+                        .write_string(&self.store.print_store_path(&v))
+                        .await?;
                 } else {
-                    self.write_string("").await?;
+                    self.con.write_string("").await?;
                 }
-                self.write_string(&v.nar_hash.to_string()).await?; // TODO: change to sha2 crate
-                self.write_u64(v.references.len() as u64).await?;
+                self.con.write_string(&v.nar_hash.to_string()).await?; // TODO: change to sha2 crate
+                self.con.write_u64(v.references.len() as u64).await?;
                 for v in &v.references {
-                    self.write_string(&self.store.print_store_path(v)).await?;
+                    self.con
+                        .write_string(&self.store.print_store_path(v))
+                        .await?;
                 }
-                self.write_u64(v.registration_time.timestamp() as u64)
+                self.con
+                    .write_u64(v.registration_time.timestamp() as u64)
                     .await?;
                 if let Some(v) = v.nar_size {
-                    self.write_u64(v).await?;
+                    self.con.write_u64(v).await?;
                 } else {
-                    self.write_u64(0).await?;
+                    self.con.write_u64(0).await?;
                 }
 
-                self.write_bool(v.ultimate).await?;
-                self.write_strings(&v.sigs).await?;
+                self.con.write_bool(v.ultimate).await?;
+                self.con.write_strings(&v.sigs).await?;
                 if let Some(ca) = v.ca {
-                    self.write_string(&ca).await?;
+                    self.con.write_string(&ca).await?;
                 } else {
-                    self.write_string("").await?;
+                    self.con.write_string("").await?;
                 }
             }
         }
@@ -235,7 +246,7 @@ impl<'a> Connection<'a> {
     }
 
     async fn is_valid_path(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         let path = self.store.parse_store_path(&path)?;
 
         debug!("checking if {} is a valid path", path);
@@ -243,13 +254,13 @@ impl<'a> Connection<'a> {
         self.logger.start_work().await?;
         let valid = self.store.is_valid_path(&path).await?;
         self.logger.stop_work(logger::WORKDONE).await?;
-        self.write_bool(valid).await?;
+        self.con.write_bool(valid).await?;
 
         Ok(())
     }
 
     async fn add_temp_root(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         let path = std::path::PathBuf::from(&path);
 
         debug!("adding temp root for {}", path.display());
@@ -258,13 +269,13 @@ impl<'a> Connection<'a> {
         warn!("implement add temp root"); // TODO: add temp root
                                           //self.store.add_temp_root(&path).await?;
         self.logger.stop_work(logger::WORKDONE).await?;
-        self.write_u64(1).await?;
+        self.con.write_u64(1).await?;
 
         Ok(())
     }
 
     async fn add_indirect_root(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         let path = std::path::PathBuf::from(&path);
 
         debug!("adding indirect root for {}", path.display());
@@ -273,7 +284,7 @@ impl<'a> Connection<'a> {
         // TODO: store.add_indirect_root(&path).await?;
         warn!("implement indirect root");
         self.logger.stop_work(logger::WORKDONE).await?;
-        self.write_u64(1).await?;
+        self.con.write_u64(1).await?;
 
         Ok(())
     }
@@ -285,43 +296,43 @@ impl<'a> Connection<'a> {
         // TODO: store.add_indirect_root(&path).await?;
         warn!("implement gc sync");
         self.logger.stop_work(logger::WORKDONE).await?;
-        self.write_u64(1).await?;
+        self.con.write_u64(1).await?;
 
         Ok(())
     }
 
     async fn add_to_store_nar(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         //let path = std::path::PathBuf::from(&path);
         let path = self.store.parse_store_path(&path)?;
         //let mut path = super::store::ValidPathInfo::from(path);
         let mut path = super::store::ValidPathInfo::new(path);
 
-        let deriver = self.read_string().await?;
+        let deriver = self.con.read_string().await?;
         let deriver = self.store.parse_store_path(&deriver).ok();
         path.deriver = deriver;
 
         debug!("add {} to store", path);
 
-        //path.nar_hash = super::store::Hash::sha256(self.read_string().await?);
-        path.nar_hash = super::store::Hash::from_sha256(&self.read_string().await?)?;
+        //path.nar_hash = super::store::Hash::sha256(self.con.read_string().await?);
+        path.nar_hash = super::store::Hash::from_sha256(&self.con.read_string().await?)?;
         // read references
         let store = &self.store;
-        let references = self.read_strings().await?;
+        let references = self.con.read_strings().await?;
         let references: crate::store::path::StorePaths = references
             .into_iter()
             .map(move |v| store.parse_store_path(&v).unwrap())
             .collect();
         path.references = references;
         path.registration_time =
-            chrono::NaiveDateTime::from_timestamp(self.read_int().await? as i64, 0);
-        path.nar_size = Some(self.read_int().await?);
-        path.ultimate = self.read_int().await? != 0;
-        path.sigs = self.read_strings().await?;
-        path.ca = Some(self.read_string().await?); // TODO: better type
+            chrono::NaiveDateTime::from_timestamp(self.con.read_u64().await? as i64, 0);
+        path.nar_size = Some(self.con.read_u64().await?);
+        path.ultimate = self.con.read_u64().await? != 0;
+        path.sigs = self.con.read_strings().await?;
+        path.ca = Some(self.con.read_string().await?); // TODO: better type
 
-        let repair = self.read_int().await? != 0;
-        let mut dont_check_sigs = self.read_int().await? != 0;
+        let repair = self.con.read_u64().await? != 0;
+        let mut dont_check_sigs = self.con.read_u64().await? != 0;
         if !self.trusted && dont_check_sigs {
             dont_check_sigs = false;
         }
@@ -331,16 +342,17 @@ impl<'a> Connection<'a> {
 
         self.logger.start_work().await?;
 
-        self.write_u64(0x64617461).await?;
-        self.write_u64(20).await?;
+        self.con.write_u64(0x64617461).await?;
+        self.con.write_u64(20).await?;
 
-        let mut reader = self.reader.write().unwrap();
+        //let mut reader = self.reader.write().unwrap();
+        let mut reader: &[u8] = &[0, 0, 0, 0];
         self.store
             .add_to_store(
                 path,
                 /*source,*/ repair,
                 !dont_check_sigs,
-                &mut (*reader),
+                &mut (reader),
             )
             .await?;
         self.logger.stop_work(logger::WORKDONE).await?;
@@ -350,12 +362,12 @@ impl<'a> Connection<'a> {
 
     #[allow(dead_code, unused_assignments, unused_variables)]
     async fn add_to_store(&mut self) -> EmptyResult {
-        let base_name = self.read_string().await?;
-        let fixed = self.read_int().await? != 0; // obsolete?
-        let methode = self.read_int().await?;
+        let base_name = self.con.read_string().await?;
+        let fixed = self.con.read_u64().await? != 0; // obsolete?
+        let methode = self.con.read_u64().await?;
         use std::convert::TryFrom;
         let mut methode = super::store::FileIngestionMethod::try_from(methode)?;
-        let mut s = self.read_string().await?;
+        let mut s = self.con.read_string().await?;
 
         trace!("adding {} to store", base_name);
 
@@ -378,16 +390,17 @@ impl<'a> Connection<'a> {
         warn!("hash: {}", hash);
         // TODO: add to sql database
         let path = self.store.print_store_path(&hash.path);
-        self.write_string(&path).await?; // TODO: rename to path
+        self.con.write_string(&path).await?; // TODO: rename to path
 
         Ok(())
     }
 
     async fn add_text_to_store(&mut self) -> EmptyResult {
-        let suffix = self.read_string().await?;
-        let s = self.read_os_string().await?;
+        let suffix = self.con.read_string().await?;
+        let s = self.con.read_os_string().await?;
 
         let refs: Result<crate::store::path::StorePaths, StoreError> = self
+            .con
             .read_strings()
             .await?
             .into_iter()
@@ -404,19 +417,19 @@ impl<'a> Connection<'a> {
 
         let path = self.store.print_store_path(&path.path);
 
-        self.write_string(&path).await?;
+        self.con.write_string(&path).await?;
 
         Ok(())
     }
 
     async fn build_paths(&mut self) -> EmptyResult {
-        let mut drvs = self.read_strings().await?;
+        let mut drvs = self.con.read_strings().await?;
         let drvs: Vec<crate::store::path::StorePathWithOutputs> = drvs
             .drain(..)
             .map(|v| self.store.parse_store_path_with_outputs(&v).unwrap())
             .collect();
 
-        let mode = self.read_int().await?;
+        let mode = self.con.read_u64().await?;
         trace!("using mode: {}", mode);
 
         self.logger.start_work().await?;
@@ -424,20 +437,20 @@ impl<'a> Connection<'a> {
         self.store.build_paths(drvs, mode as u8).await?;
         self.logger.stop_work(logger::WORKDONE).await?;
 
-        self.write_u64(1).await?;
+        self.con.write_u64(1).await?;
 
         Ok(())
     }
 
     async fn ensure_path(&mut self) -> EmptyResult {
-        let path = self.read_string().await?;
+        let path = self.con.read_string().await?;
         trace!("ensure path {}", path);
 
         self.logger.start_work().await?;
         //self.store.ensure_path(path).await?; // TODO: implement
         self.logger.stop_work(logger::WORKDONE).await?;
 
-        self.write_u64(1).await?;
+        self.con.write_u64(1).await?;
         Ok(())
     }
 
@@ -460,7 +473,8 @@ impl<'a> Connection<'a> {
             std::fs::create_dir_all(v)?;
         }
 
-        let mut reader = self.reader.write().unwrap();
+        //let mut reader = self.reader.write().unwrap();
+        let mut reader = self.con.reader.lock().unwrap();
         let parser = crate::archive::NarParser::new(
             &extract_file,
             &mut *reader,
@@ -501,7 +515,7 @@ impl<'a> Connection<'a> {
     }
 
     // TODO: maybe implement own Async{Read,Write}Ext
-    async fn read_int(&self) -> Result<u64, StoreError> {
+    /*async fn read_int(&self) -> Result<u64, StoreError> {
         let mut reader = self.reader.write().unwrap();
         let mut buf: [u8; 8] = [0; 8];
 
@@ -525,14 +539,14 @@ impl<'a> Connection<'a> {
 
     async fn write_bool(&self, v: bool) -> EmptyResult {
         if v {
-            self.write_u64(1).await
+            self.con.write_u64(1).await
         } else {
-            self.write_u64(0).await
+            self.con.write_u64(0).await
         }
     }
 
     async fn read_os_string(&self) -> Result<Vec<u8>, StoreError> {
-        let mut len = self.read_int().await?;
+        let mut len = self.con.read_int().await?;
 
         let mut buf: [u8; 1024] = [0; 1024];
         let mut value = Vec::new();
@@ -549,13 +563,13 @@ impl<'a> Connection<'a> {
         drop(reader);
 
         self.update_hasher(&value).await?;
-        self.read_padding(len).await?;
+        self.con.read_padding(len).await?;
 
         Ok(value)
     }
 
     async fn read_string(&self) -> Result<String, StoreError> {
-        Ok(String::from_utf8_lossy(&self.read_os_string().await?).to_string())
+        Ok(String::from_utf8_lossy(&self.con.read_os_string().await?).to_string())
     }
 
     async fn write_string(&self, str: &str) -> EmptyResult {
@@ -563,33 +577,33 @@ impl<'a> Connection<'a> {
 
         trace!("writing string '{}' with len {}", str, len);
 
-        self.write_u64(len as u64).await?;
+        self.con.write_u64(len as u64).await?;
 
         let mut writer = self.writer.write().unwrap();
         writer.write(str.as_bytes()).await?;
         drop(writer);
 
-        self.write_padding(len).await?;
+        self.con.write_padding(len).await?;
 
         Ok(())
     }
 
     async fn read_strings(&self) -> Result<Vec<String>, StoreError> {
-        let len = self.read_int().await?;
+        let len = self.con.read_int().await?;
 
         let mut vec = Vec::with_capacity(len as usize);
         for _v in 0..len {
-            vec.push(self.read_string().await?);
+            vec.push(self.con.read_string().await?);
         }
 
         Ok(vec)
     }
 
     async fn write_strings(&self, v: &Vec<String>) -> EmptyResult {
-        self.write_u64(v.len() as u64).await?;
+        self.con.write_u64(v.len() as u64).await?;
 
         for v in v {
-            self.write_string(v).await?;
+            self.con.write_string(v).await?;
         }
 
         Ok(())
@@ -619,7 +633,7 @@ impl<'a> Connection<'a> {
         }
 
         Ok(())
-    }
+    }*/
 }
 
 // This trivial implementation of `drop` adds a print to console.

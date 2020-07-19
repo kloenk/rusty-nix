@@ -1,4 +1,4 @@
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex};
 
 use crate::error::ConnectionError;
 use tokio::io::AsyncWriteExt;
@@ -28,11 +28,11 @@ pub struct TunnelLogger<'a> {
 
     pub client_version: u16,
 
-    writer: Arc<RwLock<WriteHalf<'a>>>,
+    writer: Arc<Mutex<WriteHalf<'a>>>,
 }
 
 impl<'a> TunnelLogger<'a> {
-    pub fn new(client_version: u16, writer: Arc<RwLock<WriteHalf<'a>>>) -> Self {
+    pub fn new(client_version: u16, writer: Arc<Mutex<WriteHalf<'a>>>) -> Self {
         Self {
             client_version,
             writer,
@@ -41,11 +41,11 @@ impl<'a> TunnelLogger<'a> {
             pending_msgs: Vec::new(),
         }
     }
-
+    #[deprecated = "use logger trait on connection"]
     pub async fn start_work(&mut self) -> Result<(), ConnectionError> {
         self.can_send_stderr = true;
 
-        let mut writer = self.writer.write().unwrap(); // TODO: do we need error handling?
+        let mut writer = self.writer.lock().unwrap(); // TODO: do we need error handling?
         for v in self.pending_msgs.drain(..) {
             writer.write(&v.as_ref()).await?;
         }
@@ -57,7 +57,7 @@ impl<'a> TunnelLogger<'a> {
     pub async fn stop_work(&mut self, state: WorkFinish) -> Result<(), ConnectionError> {
         self.can_send_stderr = false;
 
-        let mut writer = self.writer.write().unwrap(); // TODO: error handling?
+        let mut writer = self.writer.lock().unwrap(); // TODO: error handling?
         let mut buf: [u8; 8] = [0; 8];
         if let WorkFinish::Error(msg, s) = state {
             LittleEndian::write_u64(&mut buf, STDERR_ERROR);
