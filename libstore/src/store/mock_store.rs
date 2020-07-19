@@ -147,7 +147,7 @@ impl WriteStore for Arc<MockStore> {
         path: ValidPathInfo,
         repair: bool,
         check_sigs: bool,
-        reader: &'a mut (dyn tokio::io::AsyncRead + Unpin),
+        reader: &'a crate::source::Connection,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         unimplemented!()
     }
