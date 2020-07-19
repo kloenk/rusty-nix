@@ -160,10 +160,16 @@ fn ieieo(act: usize, expt: usize) -> Result<(), std::io::Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone)]
+pub struct HashResult {
+    pub hash: crate::store::Hash,
+    pub size: usize,
+}
+
+#[derive(Clone)] // TODO: add Debug (not supported by Context)
 pub struct Connection<'a> {
     pub reader: Arc<Mutex<ReadHalf<'a>>>,
     pub writer: Arc<Mutex<WriteHalf<'a>>>,
+    pub hasher: Arc<Mutex<Option<(usize, ring::digest::Context)>>>,
 }
 
 impl<'b> Connection<'b> {
@@ -171,11 +177,55 @@ impl<'b> Connection<'b> {
         Self {
             reader: Arc::new(Mutex::new(reader)),
             writer: Arc::new(Mutex::new(writer)),
+            hasher: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn new_arc(reader: Arc<Mutex<ReadHalf<'b>>>, writer: Arc<Mutex<WriteHalf<'b>>>) -> Self {
-        Self { reader, writer }
+        Self {
+            reader,
+            writer,
+            hasher: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    pub fn set_hasher(&self) -> Result<(), std::io::Error> {
+        let mut hasher = self.hasher.lock().unwrap();
+        if hasher.is_some() {
+            return Err(std::io::Error::from_raw_os_error(libc::EFAULT));
+        }
+
+        *hasher = Some((0, ring::digest::Context::new(&ring::digest::SHA256)));
+
+        Ok(())
+    }
+
+    pub fn get_hasher(
+        &self,
+    ) -> Result<Arc<Mutex<Option<(usize, ring::digest::Context)>>>, std::io::Error> {
+        Ok(self.hasher.clone())
+    }
+
+    pub fn pop_hasher(&self) -> Result<HashResult, crate::StoreError> {
+        let hasher = self.hasher.lock().unwrap().take();
+
+        if hasher.is_none() {
+            Err(std::io::Error::from_raw_os_error(libc::EFAULT))?;
+        }
+        let (size, hasher) = hasher.unwrap();
+
+        Ok(HashResult {
+            hash: crate::store::Hash::from_sha256_vec(hasher.finish().as_ref())?,
+            size,
+        })
+    }
+
+    pub fn update_hash(&self, size: usize, buf: &[u8]) {
+        let mut hasher = self.hasher.lock().unwrap();
+        if let Some(v) = &mut *hasher {
+            v.0 += size;
+            v.1.update(buf);
+        }
     }
 }
 
@@ -193,7 +243,9 @@ impl<'b> AsyncRead for Connection<'b> {
             // TODO: add optional hasher
 
             let mut reader = self.reader.lock().unwrap();
-            Ok(reader.read_exact(&mut buf[0..len]).await?)
+            let size = reader.read_exact(&mut buf[0..len]).await?;
+            self.update_hash(size, &buf);
+            Ok(size)
         }))
     }
 }
@@ -209,7 +261,7 @@ impl<'b> AsyncWrite for Connection<'b> {
 }
 
 #[cfg(test)]
-mod test {
+pub(crate) mod test {
     use super::{Arc, AsyncRead, AsyncReadExt, AsyncWrite, Box, LocalFutureObj, Mutex};
     use std::io::Cursor;
     pub struct Connection {

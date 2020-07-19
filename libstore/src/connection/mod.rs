@@ -474,14 +474,11 @@ impl<'a> Connection<'a> {
         }
 
         //let mut reader = self.reader.write().unwrap();
-        let mut reader = self.con.reader.lock().unwrap();
-        let parser = crate::archive::NarParser::new(
-            &extract_file,
-            &mut *reader,
-            self.store.box_clone_write(),
-        );
+        self.con.set_hasher()?;
+        let parser =
+            crate::archive::NarParser::new(&extract_file, &self.con, self.store.box_clone_write());
         let parser = parser.parse().await.unwrap();
-        drop(reader);
+        let parser = self.con.pop_hasher()?;
 
         let hash_compressed = parser.hash.clone();
         //let hash_compressed = hash_compressed.compress_hash(20)?;
@@ -498,13 +495,13 @@ impl<'a> Connection<'a> {
 
         std::fs::rename(extract_file, self.store.print_store_path(&result))?; // TODO: will alsway have localStore?
 
-        let result = ValidPathInfo::now(result, parser.hash, parser.len)?;
+        let result = ValidPathInfo::now(result, parser.hash, parser.size as u64)?;
         let result = self.store.register_path(result).await?;
 
         Ok(result)
     }
 
-    pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
+    /*pub async fn update_hasher(&self, data: &[u8]) -> EmptyResult {
         let mut hasher = self.hasher.write().unwrap();
         if let Some(v) = &mut *hasher {
             v.1 += data.len();
@@ -512,7 +509,7 @@ impl<'a> Connection<'a> {
         }
 
         Ok(())
-    }
+    }*/
 
     // TODO: maybe implement own Async{Read,Write}Ext
     /*async fn read_int(&self) -> Result<u64, StoreError> {
