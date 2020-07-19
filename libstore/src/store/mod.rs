@@ -146,7 +146,7 @@ pub trait WriteStore: ReadStore + Store {
         path: ValidPathInfo,
         repair: bool,
         check_sigs: bool,
-        reader: &'a mut (dyn tokio::io::AsyncRead + Unpin),
+        reader: &'a crate::source::Connection,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn create_user<'a>(

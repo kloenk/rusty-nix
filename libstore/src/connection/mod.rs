@@ -326,18 +326,8 @@ impl<'a> Connection<'a> {
 
         self.con.start_work().await?;
 
-        self.con.write_u64(0x64617461).await?;
-        self.con.write_u64(20).await?;
-
-        //let mut reader = self.reader.write().unwrap();
-        let mut reader: &[u8] = &[0, 0, 0, 0];
         self.store
-            .add_to_store(
-                path,
-                /*source,*/ repair,
-                !dont_check_sigs,
-                &mut (reader),
-            )
+            .add_to_store(path, /*source,*/ repair, !dont_check_sigs, &self.con)
             .await?;
         self.con.stop_work(WORKDONE).await?;
 

@@ -176,6 +176,9 @@ pub struct Connection<'a> {
     pub writer: Arc<Mutex<WriteHalf<'a>>>,
     pub hasher: Arc<Mutex<Option<(usize, ring::digest::Context)>>>,
 
+    // tunnelsource flag
+    pub tunnelsource: Arc<std::sync::atomic::AtomicBool>,
+
     // logger types
     pub can_send: Arc<std::sync::atomic::AtomicBool>,
     pub pending_msgs: Arc<Mutex<Vec<String>>>,
@@ -188,6 +191,8 @@ impl<'b> Connection<'b> {
             writer: Arc::new(Mutex::new(writer)),
             hasher: Arc::new(Mutex::new(None)),
 
+            tunnelsource: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+
             can_send: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_msgs: Arc::new(Mutex::new(Vec::new())),
         }
@@ -198,6 +203,8 @@ impl<'b> Connection<'b> {
             reader,
             writer,
             hasher: Arc::new(Mutex::new(None)),
+
+            tunnelsource: Arc::new(std::sync::atomic::AtomicBool::new(false)),
 
             can_send: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             pending_msgs: Arc::new(Mutex::new(Vec::new())),
@@ -242,6 +249,14 @@ impl<'b> Connection<'b> {
             v.1.update(buf);
         }
     }
+
+    pub fn set_tunnel(&self, tunnel: bool) -> bool {
+        self.tunnelsource.swap(tunnel, Ordering::Relaxed)
+    }
+
+    pub fn get_tunnel(&self) -> bool {
+        self.tunnelsource.load(Ordering::Relaxed)
+    }
 }
 
 impl<'b> AsyncRead for Connection<'b> {
@@ -255,9 +270,23 @@ impl<'b> AsyncRead for Connection<'b> {
                 return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
             }
 
-            // TODO: add optional hasher
+            let mut reader = if self.get_tunnel() {
+                self.write_u64(STDERR::READ as u64).await?;
+                self.write_u64(len as u64).await?;
+                let mut writer = self.writer.lock().unwrap();
+                use tokio::io::AsyncWriteExt;
+                (*writer).flush().await?;
+                drop(writer);
 
-            let mut reader = self.reader.lock().unwrap();
+                let mut buf: [u8; 8] = [0; 8];
+                let mut reader = self.reader.lock().unwrap();
+                reader.read_exact(&mut buf).await?;
+                reader
+            } else {
+                self.reader.lock().unwrap()
+            };
+
+            //let mut reader = self.reader.lock().unwrap();
             let size = reader.read_exact(&mut buf[0..len]).await?;
             self.update_hash(size, &buf);
             Ok(size)
