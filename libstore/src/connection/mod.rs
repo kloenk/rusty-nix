@@ -57,12 +57,10 @@ enum Data {
     USize(usize),
 }
 
-pub struct Connection<'a> {
+pub struct Connection {
     pub trusted: bool,
 
-    con: crate::source::Connection<'a>,
-
-    hasher: RwLock<Option<(ring::digest::Context, usize)>>,
+    con: crate::source::Connection,
 
     uid: u32,
     u_name: String,
@@ -70,24 +68,18 @@ pub struct Connection<'a> {
     store: Box<dyn crate::store::BuildStore>,
 }
 
-impl<'a> Connection<'a> {
+impl Connection {
     pub fn new(
         trusted: bool,
         client_version: u16,
-        stream: &'a mut UnixStream,
+        con: crate::source::Connection,
         store: Box<dyn crate::store::BuildStore>,
         uid: u32,
         u_name: String,
     ) -> Self {
-        let (reader, writer) = stream.split();
-        let con = crate::source::Connection::new(reader, writer);
-
-        let hasher = RwLock::new(None);
-
         Self {
             trusted,
             con,
-            hasher,
             store,
             uid,
             u_name,
@@ -477,9 +469,10 @@ impl<'a> Connection<'a> {
 }
 
 // This trivial implementation of `drop` adds a print to console.
-impl<'a> Drop for Connection<'a> {
+impl Drop for Connection {
     fn drop(&mut self) {
         //println!("> Dropping {}", self.name);
         debug!("dropping Connecton");
+        // TODOD: or send close here? but we don't have the last error
     }
 }

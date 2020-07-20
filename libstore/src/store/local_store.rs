@@ -323,6 +323,8 @@ impl WriteStore for Arc<LocalStore> {
                 // TODO: references, ca
                 let info = self.register_path(info).await?;
                 return Ok(info);
+            } else {
+                trace!("text exists, query");
             }
             self.query_path_info(&dest_path).await
         }))
@@ -620,13 +622,26 @@ impl ReadStore for Arc<LocalStore> {
                 if v as u64 == data.id {
                     continue;
                 } // has itsself as refferencse
-                let row = stm.query_row(&[v], |row| {
+                match stm.query_row(&[v], |row| {
                     let path = self
                         .parse_store_path(&row.get::<usize, String>(0)?)
                         .unwrap();
                     Ok(path)
-                })?;
-                data.references.push(row);
+                }) {
+                    Ok(path) => {
+                        data.references.push(path);
+                    }
+                    Err(e) => {
+                        warn!("could not query ref {}: '{}'", v, e);
+                    }
+                }
+                /*let row = stm.query_row(&[v], |row| {
+                    let path = self
+                        .parse_store_path(&row.get::<usize, String>(0)?)
+                        .unwrap();
+                    Ok(path)
+                }).unwrap();
+                data.references.push(row);*/
             }
 
             trace!("{:?}", data);
@@ -664,6 +679,7 @@ impl ReadStore for Arc<LocalStore> {
             let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
             let data = stm.query_row(&[&path], |row| Ok(true)).unwrap_or(false);
+            // TODO: check if path exists on disk
 
             Ok(data)
         }))

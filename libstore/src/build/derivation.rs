@@ -127,7 +127,8 @@ impl Derivation {
         let outputs = String::from_utf8_lossy(&buf);
         let outputs = outputs.trim_matches(']');
         let outputs: Vec<&str> = outputs.split(')').collect();
-        for v in outputs {
+        for vo in outputs {
+            let v = vo.trim_matches(',');
             let v = v.trim_matches('(');
             let v: Vec<&str> = v.split(",").map(|v| v.trim_matches('"')).collect();
             if v.len() == 1 {
@@ -135,7 +136,7 @@ impl Derivation {
             }
             if v.len() != 4 {
                 return Err(StoreError::InvalidDerivation {
-                    msg: "Invalid output".to_string(),
+                    msg: format!("Invalid output: {}", vo),
                 });
             }
 

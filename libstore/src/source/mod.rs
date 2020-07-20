@@ -171,9 +171,8 @@ pub struct HashResult {
 }
 
 #[derive(Clone)] // TODO: add Debug (not supported by Context)
-pub struct Connection<'a> {
-    pub reader: Arc<Mutex<ReadHalf<'a>>>,
-    pub writer: Arc<Mutex<WriteHalf<'a>>>,
+pub struct Connection {
+    pub stream: Arc<Mutex<tokio::net::UnixStream>>,
     pub hasher: Arc<Mutex<Option<(usize, ring::digest::Context)>>>,
 
     // tunnelsource flag
@@ -184,11 +183,10 @@ pub struct Connection<'a> {
     pub pending_msgs: Arc<Mutex<Vec<String>>>,
 }
 
-impl<'b> Connection<'b> {
-    pub fn new(reader: ReadHalf<'b>, writer: WriteHalf<'b>) -> Self {
+impl Connection {
+    pub fn new(stream: tokio::net::UnixStream) -> Self {
         Self {
-            reader: Arc::new(Mutex::new(reader)),
-            writer: Arc::new(Mutex::new(writer)),
+            stream: Arc::new(Mutex::new(stream)),
             hasher: Arc::new(Mutex::new(None)),
 
             tunnelsource: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -198,10 +196,9 @@ impl<'b> Connection<'b> {
         }
     }
 
-    pub fn new_arc(reader: Arc<Mutex<ReadHalf<'b>>>, writer: Arc<Mutex<WriteHalf<'b>>>) -> Self {
+    pub fn new_arc(stream: Arc<Mutex<tokio::net::UnixStream>>) -> Self {
         Self {
-            reader,
-            writer,
+            stream,
             hasher: Arc::new(Mutex::new(None)),
 
             tunnelsource: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -259,7 +256,7 @@ impl<'b> Connection<'b> {
     }
 }
 
-impl<'b> AsyncRead for Connection<'b> {
+impl AsyncRead for Connection {
     fn read_exact<'a>(
         &'a self,
         buf: &'a mut [u8],
@@ -273,17 +270,15 @@ impl<'b> AsyncRead for Connection<'b> {
             let mut reader = if self.get_tunnel() {
                 self.write_u64(STDERR::READ as u64).await?;
                 self.write_u64(len as u64).await?;
-                let mut writer = self.writer.lock().unwrap();
-                use tokio::io::AsyncWriteExt;
-                (*writer).flush().await?;
-                drop(writer);
 
                 let mut buf: [u8; 8] = [0; 8];
-                let mut reader = self.reader.lock().unwrap();
+                let mut reader = self.stream.lock().unwrap();
                 reader.read_exact(&mut buf).await?;
+                let len_send = LittleEndian::read_u64(&buf);
+                ieieo(len_send as usize, len)?;
                 reader
             } else {
-                self.reader.lock().unwrap()
+                self.stream.lock().unwrap()
             };
 
             //let mut reader = self.reader.lock().unwrap();
@@ -294,18 +289,18 @@ impl<'b> AsyncRead for Connection<'b> {
     }
 }
 
-impl<'b> AsyncWrite for Connection<'b> {
+impl AsyncWrite for Connection {
     fn write<'a>(&'a self, buf: &'a [u8]) -> LocalFutureObj<'a, Result<usize, std::io::Error>> {
         LocalFutureObj::new(Box::new(async move {
             use tokio::io::AsyncWriteExt;
-            let mut writer = self.writer.lock().unwrap(); // TODO: return EBUSSY
+            let mut writer = self.stream.lock().unwrap(); // TODO: return EBUSSY
             Ok(writer.write(buf).await?)
         }))
     }
 }
 
 use std::sync::atomic::Ordering;
-impl<'b> Logger for Connection<'b> {
+impl Logger for Connection {
     fn can_send(&self) -> bool {
         self.can_send.load(Ordering::Relaxed)
     }
