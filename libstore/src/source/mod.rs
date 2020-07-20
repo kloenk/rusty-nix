@@ -160,6 +160,7 @@ pub trait AsyncWrite {
 // TODO: make as macro
 fn ieieo(act: usize, expt: usize) -> Result<(), std::io::Error> {
     if act != expt {
+        log::warn!("ieieo! act: {}, expt: {}", act, expt);
         return Err(std::io::Error::from_raw_os_error(libc::EIO));
     }
     Ok(())
@@ -267,9 +268,46 @@ impl AsyncRead for Connection {
                 return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
             }
 
-            let mut reader = if self.get_tunnel() {
+            let size = if self.get_tunnel() {
                 self.write_u64(STDERR::READ as u64).await?;
                 self.write_u64(len as u64).await?;
+                log::trace!("requesting {} bytes from source", len);
+
+                let mut buf_int: [u8; 8] = [0; 8];
+                let mut reader = self.stream.lock().unwrap();
+                reader.read_exact(&mut buf_int).await?;
+                let len_send = LittleEndian::read_u64(&buf_int);
+                ieieo(len_send as usize, len)?;
+
+                let size = reader.read_exact(&mut buf[0..len]).await?;
+
+                if len % 8 != 0 {
+                    let len: usize = 8 - (len % 8) as usize;
+
+                    let mut buf = Vec::with_capacity(len);
+                    buf.resize(len, 0);
+
+                    reader.read_exact(&mut buf[0..len]).await?;
+                    //self.read_exact(&mut buf, len).await?;
+
+                    for v in buf {
+                        if v != 0 {
+                            log::warn!("padding is non zero");
+                            return Err(std::io::Error::from_raw_os_error(libc::EINVAL));
+                        }
+                    }
+                }
+                size
+            } else {
+                let mut reader = self.stream.lock().unwrap();
+                let size = reader.read_exact(&mut buf[0..len]).await?;
+                size
+            };
+
+            /*let mut reader = if self.get_tunnel() {
+                self.write_u64(STDERR::READ as u64).await?;
+                self.write_u64(len as u64).await?;
+                log::trace!("requesting {} bytes from source", len);
 
                 let mut buf: [u8; 8] = [0; 8];
                 let mut reader = self.stream.lock().unwrap();
@@ -282,7 +320,7 @@ impl AsyncRead for Connection {
             };
 
             //let mut reader = self.reader.lock().unwrap();
-            let size = reader.read_exact(&mut buf[0..len]).await?;
+            let size = reader.read_exact(&mut buf[0..len]).await?;*/
             self.update_hash(size, &buf);
             Ok(size)
         }))
