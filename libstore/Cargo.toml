@@ -21,6 +21,7 @@ libc = "*"
 ring = { version = "*", features = [ "std", "dev_urandom_fallback" ] }
 lazy_static = "*"
 data-encoding = "*"
+nix = "*"
 
 libutil = { path = "../libutil" }
 

@@ -29,7 +29,12 @@ custom_error! {
         HashDecodePartialError { error: String } = "cannont decode {error}",
         InvalidFileIngestionMethode { methode: u8 } = "invalid FileIngestionMethode: {methode}",
         BadArchive{ msg: String } = "BadArchive: {msg}",
+        NoBuildJobs{ jobs: usize } = "{jobs} derivations need to be built, but neither local builds ('--max-jobs') nor remote builds ('--builders') are enabled",
+        InvalidHashPart{ path: String, hash_part: String } = "The path {path} does not have a valid hash part {hash_part}",
+        HashMismatch{ path: crate::store::StorePath } = "The Hash for {path} does not match",
+        InvalidDerivation{ msg: String } = "InvalidDerivation: {msg}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
+        BadBase32 = "Bad base 32 structure",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
@@ -53,4 +58,14 @@ custom_error! {
         MissingName{} = "etry name is missing",
         InvalidSymlinkMarker{ marker: String } = "invalid target marker for symlink: '{marker}'",
         InvalidState{state: crate::archive::State } = "InvalidState: {state}", // TODO: add case info
+}
+
+custom_error! {
+    pub BuildError
+        Io{source: std::io::Error} = "IO: {source}",
+        NoFreeUsers{} = "No free users could be found",
+        NoBuildUsers{} = "No build user group is set in config",
+        UserNotExisting{ user: String } = "the user '{user}' does not exist",
+        UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
+        SysError{ msg: String } = "SysError {msg}",
 }

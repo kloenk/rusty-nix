@@ -33,6 +33,9 @@ pub struct NixConfig {
     #[serde(default = "default_store")]
     pub store: String, // The default Nix store to use.
 
+    #[serde(default = "default_state_dir")]
+    pub nix_state_dir: String,
+
     #[serde(default = "default_socket_path")]
     pub nix_daemon_socket_file: String, // path to the nix daemon socket path
 
@@ -312,6 +315,10 @@ fn default_store() -> String {
     var("NIX_REMOTE").unwrap_or_else(|_| String::from("auto"))
 }
 
+fn default_state_dir() -> String {
+    String::from("/nix/var/nix")
+}
+
 fn default_socket_path() -> String {
     String::from("/nix/var/nix/daemon-socket/socket")
 }
@@ -416,6 +423,11 @@ fn default_system_features() -> Vec<String> {
         vec.push(String::from("kvm"));
     }
     vec
+}
+
+#[cfg(not(any(target_os = "linux")))]
+fn default_system_features() -> Vec<String> {
+    vec![]
 }
 
 struct Deserializer<'de> {

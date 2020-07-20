@@ -58,6 +58,7 @@ impl NixDaemon {
         let nix_config = libutil::config::NixConfig::parse_file(config_file)?;
         let mut store_config = libstore::CONFIG.write().unwrap();
         *store_config = nix_config;
+        drop(store_config);
         // TODO: merge with args
 
         let mut config = Self { stdio: false };
@@ -228,16 +229,18 @@ impl NixDaemon {
 
         let store = libstore::open_store(&store, params).await.unwrap();
 
-        // TODO: start tunnelloger
-        let connection = Connection::new(trusted, version, &mut stream, store, creds.uid, user);
+        let con = libstore::source::Connection::new(stream);
+
+        let connection = Connection::new(trusted, version, con, store, creds.uid, user);
 
         #[allow(clippy::single_match)] // TODO: add magic?
         match connection.run().await {
+            // TODO:
             // FIXME: error
             Err(e) => {
                 trace!("shutting down stream");
                 info!("got error {} from daemon loop", e);
-                stream.shutdown(std::net::Shutdown::Both)?;
+                //stream.shutdown(std::net::Shutdown::Both)?; // TODO: where to shutndown
                 //Err(e);
             }
             Ok(_) => {}

@@ -6,10 +6,15 @@ use log::*;
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
+use std::convert::TryFrom;
+
+use super::path::StorePathWithOutputs;
+use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
 
 use std::sync::{Arc, RwLock};
 
 #[allow(dead_code)]
+#[derive(Clone, Debug)]
 pub struct LocalStore {
     base_dir: String,
     params: std::collections::HashMap<String, super::Param>,
@@ -21,7 +26,7 @@ impl LocalStore {
     pub async fn open_store(
         path: &str,
         params: std::collections::HashMap<String, super::Param>,
-    ) -> Result<Self, crate::error::StoreError> {
+    ) -> Result<Arc<Self>, crate::error::StoreError> {
         // TODO: access checks?
         trace!("opening local store {}", path);
         trace!("got params: {:?}", params);
@@ -40,7 +45,7 @@ impl LocalStore {
 
         store.make_store_writable().await?;
 
-        Ok(store)
+        Ok(Arc::new(store))
     }
 
     #[cfg(target_os = "linux")]
@@ -88,7 +93,7 @@ impl LocalStore {
     }
 
     #[cfg(not(target_os = "linux"))]
-    async fn make_store_writable<'a>(&'a mut self) -> Result<(), StoreError> {
+    async fn make_store_writable<'a>(&'a self) -> Result<(), StoreError> {
         Ok(())
     }
 
@@ -101,99 +106,344 @@ impl LocalStore {
     }
 }
 
-impl crate::Store for LocalStore {
-    fn get_state_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
+impl BuildStore for Arc<LocalStore> {
+    fn build_paths<'a>(
+        &'a self,
+        drvs: Vec<StorePathWithOutputs>,
+        mode: u8,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            Ok(format!("{}/var/nix/", self.base_dir))
+            info!("building pathes: {:?}", drvs);
+
+            let worker = crate::build::worker::Worker::new();
+
+            self.prime_cache(&drvs).await?;
+
+            warn!("unimplemented build_paths");
+            //unimplemented!(); // TODO: implement things
+            Ok(())
         }))
     }
 
-    fn get_store_dir<'a>(&'a mut self) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(
-            async move { Ok(format!("{}store", self.base_dir)) },
-        ))
+    fn query_missing<'a>(
+        &'a self,
+        paths: &'a Vec<StorePathWithOutputs>,
+    ) -> LocalFutureObj<'a, Result<super::MissingInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            info!("quering info about missing paths");
+
+            use std::sync::{Arc, Mutex};
+            let state = Arc::new(Mutex::new(super::MissingInfo::new()));
+
+            /*let do_path = |path: &'a StorePathWithOutputs,
+                           state: Arc<Mutex<super::MissingInfo>>,
+                           store: Arc<LocalStore>,
+                           substitute: bool| async move {
+                let mut state_l = state.lock().unwrap();
+                if state_l.done.contains(&path.path.name()) {
+                    return Ok(());
+                }
+                state_l.done.push(path.path.name());
+                drop(state_l);
+
+                println!("working on {}", path.path.name());
+
+                if path.path.is_derivation() {
+                    if !store.is_valid_path(&path.path).await? {
+                        //insert into unknown
+                        // TODO: we could try to substitute the drv
+                        let mut state_l = state.lock().unwrap();
+                        state_l.unknown.push(path.path.clone());
+                        return Ok(());
+                    }
+                    let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
+                    let drv =
+                        crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
+
+                    // TODO:
+                    /*
+                    PathSet invalid;
+                    for (auto & j : drv->outputs)
+                        if (wantOutput(j.first, path.outputs)
+                            && !isValidPath(j.second.path))
+                            invalid.insert(printStorePath(j.second.path));
+                    if (invalid.empty()) return;*/
+                    let mut invalid = crate::store::path::StorePaths::new();
+                    for (name, out) in &drv.derivation.outputs {
+                        if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
+                            trace!("adding {} to doto list", self.print_store_path(&out.path));
+                            invalid.push(out.path.clone());
+                        }
+                    }
+                    if invalid.is_empty() {
+                        return Ok(());
+                    }
+
+                    if substitute && drv.substitutes_allowed() {
+                        for v in invalid {
+                            debug!("check for subst: {}", v);
+                            //do_path(v, state.clone(), store.clone(), substitute).await?;
+                            unimplemented!("qeue path");
+                            // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
+                        }
+                    } else {
+                        unimplemented!("no substitute enabled");
+                    }
+                } else {
+                    warn!("non derivation path: {}", self.print_store_path(&path.path));
+                    /*
+                    if (isValidPath(path.path)) return;
+
+                    SubstitutablePathInfos infos;
+                    querySubstitutablePathInfos({path.path}, infos);
+
+                    if (infos.empty()) {
+                        auto state(state_.lock());
+                        state->unknown.insert(path.path);
+                        return;
+                    }
+
+                    auto info = infos.find(path.path);
+                    assert(info != infos.end());
+
+                    {
+                        auto state(state_.lock());
+                        state->willSubstitute.insert(path.path);
+                        state->downloadSize += info->second.downloadSize;
+                        state->narSize += info->second.narSize;
+                    }
+
+                    for (auto & ref : info->second.references)
+                        pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
+                        */
+                }
+
+                /*return Err(StoreError::Unimplemented {
+                    msg: "unimplemented".to_string(),
+                });*/
+                Ok(())
+            };*/
+
+            let mut work = Vec::new();
+            for v in paths {
+                work.push(do_path(v.clone(), state.clone(), self.clone(), true));
+                // TODO: substitute from settings
+            }
+
+            let ret: Result<Vec<()>, StoreError> =
+                futures::future::join_all(work).await.into_iter().collect();
+            ret?;
+
+            let state: super::MissingInfo = Arc::try_unwrap(state).unwrap().into_inner().unwrap();
+            Ok(state)
+        }))
     }
 
-    fn create_user<'a>(
-        &'a mut self,
-        username: String,
-        uid: u32,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        //let state_dir = self.get_state_dir();
-        LocalFutureObj::new(Box::new(async move {
-            let state_dir = self.get_state_dir().await?;
-            let dirs = vec![
-                format!("{}/profiles/per-user/{}", &state_dir, username),
-                format!("{}/gcroots/per-user/{}", &state_dir, username),
-            ];
+    fn box_clone_build(&self) -> Box<dyn BuildStore> {
+        Box::new(self.clone())
+    }
+}
 
-            for dir in dirs {
-                std::fs::create_dir_all(&dir)?;
+impl WriteStore for Arc<LocalStore> {
+    fn write_file<'a>(
+        &'a self,
+        path: &'a str,
+        data: &'a [u8],
+        executable: bool,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let mut file = tokio::fs::File::create(path).await?;
+
+            use std::os::unix::fs::PermissionsExt;
+            let perms = if executable { 0o555 } else { 0o444 };
+            let perms = std::fs::Permissions::from_mode(perms);
+            file.set_permissions(perms).await?;
+
+            use tokio::io::AsyncWriteExt;
+            file.write_all(data).await?;
+            Ok(())
+        }))
+    }
+
+    fn make_directory<'a>(&'a self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = path.to_owned();
+        LocalFutureObj::new(Box::new(async move {
+            tokio::fs::create_dir_all(path).await?;
+            Ok(())
+        }))
+    }
+
+    fn make_symlink<'a>(
+        &'a self,
+        source: &'a str,
+        target: &'a str,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            unimplemented!();
+        }))
+    }
+
+    fn add_text_to_store<'a>(
+        &'a self,
+        suffix: &'a str,
+        data: &'a [u8],
+        refs: &'a super::path::StorePaths,
+        repair: bool,
+    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let hash = ring::digest::digest(&ring::digest::SHA256, data);
+            let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+            let dest_path = self.make_text_path(suffix, &hash, refs).await?;
+            trace!("will write texte to {}", dest_path);
+
+            self.add_temp_root(&dest_path).await?;
+
+            if repair || !self.is_valid_path(&dest_path).await? {
+                // TODO: make realpath?
+
+                self.delete_path(&dest_path).await;
+                let rm = tokio::fs::remove_file(&self.print_store_path(&dest_path)).await; // magic like moving to /nix/store/.thrash
+                trace!("rm: {:?}", rm);
+
+                //self.autoGC()
+
+                /*let mut file = tokio::fs::File::create(&dest_path).await?;
+                use tokio::io::AsyncWriteExt;
+                file.write_all(data).await?;
+
                 use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o755);
-                std::fs::set_permissions(&dir, perms)?;
-                // TODO: chown
-                let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
-                let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
-                if chown != 0 {
-                    return Err(StoreError::OsError {
-                        call: String::from("chown"),
-                        ret: chown,
+                let perms = std::fs::Permissions::from_mode(0o444);
+                file.set_permissions(perms).await?;*/
+
+                /*file.sync_all().await?; // TODO: put behind settings*/
+                self.write_file(&self.print_store_path(&dest_path), data, false)
+                    .await?;
+
+                // dumpString(data)
+                let nar = crate::archive::dump_data(&data);
+                let hash = ring::digest::digest(&ring::digest::SHA256, &nar);
+                let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
+
+                let mut info = ValidPathInfo::now(dest_path, hash, nar.len() as u64)?;
+                // TODO: references, ca
+                let info = self.register_path(info).await?;
+                return Ok(info);
+            } else {
+                trace!("text exists, query");
+            }
+            self.query_path_info(&dest_path).await
+        }))
+    }
+
+    // https://source.kloenk.de/github.com/NixOS/nix@2d6d53bc87ef7468ad73431cf76123316f4c82bf/-/blob/src/libstore/local-store.cc#L969
+    fn add_to_store<'a>(
+        &'a self,
+        path: super::ValidPathInfo,
+        repair: bool,
+        check_sigs: bool,
+        con: &'a crate::source::Connection,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            use crate::source::AsyncRead;
+            if let super::Hash::None = path.nar_hash {
+                return Err(StoreError::MissingHash {
+                    path: self.print_store_path(&path.path),
+                });
+            }
+            // TODO: return err if sig is missing
+
+            // lock file
+
+            self.add_temp_root(&path.path).await?;
+
+            if repair || !self.is_valid_path(&path.path).await? {
+                self.delete_path(&path.path);
+
+                // text hashing has long been allowed to have non-self-references because it is used for drv files.
+                /*if path.ca.is_some() && !(path.ca.unwrap().starts_with("text:") && path.references.len() == 0) || path.references.len() == 0 {
+                    unimplemented!("feature ca-refernces: {}/{}", file!(), line!());
+                }*/
+
+                let out = self.print_store_path(&path.path);
+
+                con.set_tunnel(true);
+                con.set_hasher()?;
+                // TODO: HashModuloSink
+                let parser = crate::archive::NarParser::new(&out, con, self.box_clone_write());
+                parser.parse().await.unwrap(); // TODO: parse error
+
+                con.set_tunnel(false);
+
+                let hasher = con.pop_hasher()?;
+                if hasher.hash != path.nar_hash
+                /*|| hasher.size != path.nar_size*/
+                {
+                    return Err(StoreError::HashMismatch {
+                        path: path.path.clone(),
                     });
                 }
+
+                if hasher.size as u64 != path.nar_size.unwrap_or(0) {
+                    return Err(StoreError::HashMismatch {
+                        path: path.path.clone(),
+                    });
+                }
+                // TODO: checking
+
+                /*                autoGC();
+
+                canonicalisePathMetaData(realPath, -1);
+
+                optimisePath(realPath); // FIXME: combine with hashPath()
+
+                registerValidPath(info); */
+                self.register_path(path).await?;
             }
+
+            // outputLock.setDeletion
 
             Ok(())
         }))
     }
 
-    fn is_valid_path<'a>(
-        &'a mut self,
-        path: &'a std::path::Path,
-    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
+    fn delete_path<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        let path = self.print_store_path(path);
         LocalFutureObj::new(Box::new(async move {
-            if path.to_str().unwrap() == "" {
-                return Err(StoreError::NotInStore {
-                    path: path.to_string_lossy().to_string(),
-                });
-            }
+            warn!("delete_path not yet implemented for : {}", &path);
+            //unimplemented!("delete path"); // TODO: make less ugly
 
-            let path = path.canonicalize();
-            if let Err(v) = &path {
-                if v.kind() == std::io::ErrorKind::NotFound {
-                    trace!("cannot canon path");
-                    return Ok(false);
-                }
-            }
-            let path = path?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
-                return Err(StoreError::NotInStore {
-                    path: path.to_string_lossy().to_string(),
-                });
-            }
+            #[allow(unused_must_use)]
+            std::fs::remove_dir_all(&path);
+
             let sqlite = self.sqlite.write().unwrap();
-            let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
+            sqlite.execute("DELETE FROM ValidPaths WHERE path = (?);", &[&path])?;
+            /*let mut stm = sqlite.prepare("DELETE FROM ValidPaths WHERE path = (?);")?;
 
-            let data = stm
-                .query_row(&[&path.to_str()], |row| Ok(true))
-                .unwrap_or(false);
+            let data = stm.query_map(&[&path], |row| {
+                warn!("foobar");
+                Ok(())
+            }).unwrap();*/
 
-            Ok(data)
+            Ok(())
         }))
     }
 
     fn register_path<'a>(
-        &'a mut self,
+        &'a self,
         info: ValidPathInfo,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             trace!("will register path {:?}", info);
-            let path = info.path.canonicalize()?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
+            // let path = info.path.canonicalize()?;
+            /*if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
                 return Err(StoreError::NotInStore {
                     path: path.to_string_lossy().to_string(),
                 });
-            }
+            }*/ // TODO: should fail while parsing to an StorePath
 
             let sqlite = self.sqlite.write().unwrap();
             //let mut stm = sqlite.prepare("INSERT INTO ValidPaths (path, hash, registrationTime, deriver, narSize, ultimate, sigs, ca) values (?, ?, ?, ?, ?, ?, ?, ?);")?; // TODO: prepare those in a state object or so
@@ -219,7 +469,7 @@ impl crate::Store for LocalStore {
                 ":registrationTime": info.registration_time.timestamp().to_string(),
 
             };*/
-            let path_str = path.display().to_string();
+            let path_str = self.print_store_path(&info.path);
             let hash = info.nar_hash.to_sql_string();
             let reg_time = info.registration_time.timestamp();
             let mut deriver = String::new();
@@ -230,7 +480,7 @@ impl crate::Store for LocalStore {
                 (":registrationTime", &reg_time),
             ];
             if let Some(v) = &info.deriver {
-                deriver = v.display().to_string();
+                deriver = self.print_store_path(v);
                 vec.push((":deriver", &deriver));
             }
             if let Some(nar) = info.nar_size {
@@ -264,43 +514,92 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    fn query_path_info<'a>(
-        &'a mut self,
-        path: std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<crate::store::ValidPathInfo, StoreError>> {
+    fn add_temp_root<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            if path.to_str().unwrap() == "" {
-                return Err(StoreError::NotInStore {
-                    path: path.display().to_string(),
-                });
-            }
-            let path = path.canonicalize()?;
-            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir().await?) {
-                return Err(StoreError::NotInStore {
-                    path: path.display().to_string(),
-                });
+            warn!("add temp root not yet implemented for '{}'", path);
+            Ok(())
+        }))
+    }
+
+    fn create_user<'a>(
+        &'a self,
+        username: String,
+        uid: u32,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        //let state_dir = self.get_state_dir();
+        LocalFutureObj::new(Box::new(async move {
+            let state_dir = self.get_state_dir()?;
+            let dirs = vec![
+                format!("{}/profiles/per-user/{}", &state_dir, username),
+                format!("{}/gcroots/per-user/{}", &state_dir, username),
+            ];
+
+            for dir in dirs {
+                std::fs::create_dir_all(&dir)?;
+                use std::os::unix::fs::PermissionsExt;
+                let perms = std::fs::Permissions::from_mode(0o755);
+                std::fs::set_permissions(&dir, perms)?;
+                // TODO: chown
+                let dir = std::ffi::CString::new(dir.as_str()).unwrap(); // TODO: error handling
+                let chown = unsafe { libc::chown(dir.as_ptr(), uid, libc::getgid()) };
+                if chown != 0 {
+                    return Err(StoreError::OsError {
+                        call: String::from("chown"),
+                        ret: chown,
+                    });
+                }
             }
 
-            let hash_part = get_hash_part(&path);
+            Ok(())
+        }))
+    }
+
+    fn box_clone_write(&self) -> Box<dyn WriteStore> {
+        Box::new(self.clone())
+    }
+}
+
+impl ReadStore for Arc<LocalStore> {
+    fn query_path_info<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<crate::store::ValidPathInfo, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if path == "" {
+                return Err(StoreError::NotInStore {
+                    path: self.print_store_path(&path),
+                });
+            }
+            /*let path = std::path::Path::new(path).canonicalize()?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
+                return Err(StoreError::NotInStore {
+                    path: path.display().to_string(),
+                });
+            }*/
+
+            let hash_part = path.hash_part();
             // TODO: implement lru cache
 
             // TODO: check for disk cache
             let sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id, hash, registrationTime, deriver, narSize, ultimate, sigs, ca FROM ValidPaths WHERE path = (?);")?;
 
-            trace!("queriying for {} in sqlite", path.display());
+            trace!("queriying for {} in sqlite", path);
 
-            let mut data = stm.query_map(&[&path.to_str()], |row| {
+            let mut data = stm.query_map(&[&self.print_store_path(&path)], |row| {
                 let id: u64 = row.get::<usize, isize>(0)? as u64;
                 let nar_hash: crate::store::Hash = row
                     .get::<usize, String>(1)
-                    .map(|v| crate::store::Hash::from(v.as_str()))?;
+                    .map(|v| crate::store::Hash::from_sql_string(v.as_str()).unwrap())?;
                 let registration_time: chrono::NaiveDateTime = row
                     .get::<usize, isize>(2)
                     .map(|v| chrono::NaiveDateTime::from_timestamp(v as i64, 0))?;
-                let deriver: Option<std::path::PathBuf> = row
+                let deriver: Option<StorePath> = row
                     .get::<usize, String>(3)
-                    .map(|v| std::path::PathBuf::from(v))
+                    .map(|v| self.parse_store_path(&v).unwrap())
                     .ok();
                 let nar_size: Option<u64> = row.get::<usize, isize>(4).map(|v| v as u64).ok();
                 let ultimate: bool = row.get::<usize, isize>(5).unwrap_or(0) != 0;
@@ -310,12 +609,12 @@ impl crate::Store for LocalStore {
                     .unwrap_or(Vec::new());
                 let ca: Option<String> = row.get::<usize, String>(7).ok();
                 Ok(crate::store::ValidPathInfo {
-                    path: std::path::PathBuf::from(&path),
+                    path: path.clone(),
                     deriver,
                     nar_hash,
                     references: Vec::new(), // TODO: referecnes foo
                     registration_time,
-                    nar_size: nar_size,
+                    nar_size,
                     id,
                     ultimate,
                     sigs,
@@ -326,7 +625,7 @@ impl crate::Store for LocalStore {
             //let data = data.next().ok_or_else(|| -> Result<Valid> { Err(StoreError::NotInStore{ path: path.display().to_string(), } ) } )).unwrap();
             //let data = data?;
             let mut data = data.next().ok_or(StoreError::NotInStore {
-                path: path.display().to_string(),
+                path: path.to_string(),
             })??;
 
             let mut ref_stm = sqlite.prepare("SELECT reference FROM Refs WHERE referrer = (?);")?;
@@ -342,11 +641,26 @@ impl crate::Store for LocalStore {
                 if v as u64 == data.id {
                     continue;
                 } // has itsself as refferencse
-                let row = stm.query_row(&[v], |row| {
-                    let path = std::path::PathBuf::from(row.get::<usize, String>(0)?);
+                match stm.query_row(&[v], |row| {
+                    let path = self
+                        .parse_store_path(&row.get::<usize, String>(0)?)
+                        .unwrap();
                     Ok(path)
-                })?;
-                data.references.push(row);
+                }) {
+                    Ok(path) => {
+                        data.references.push(path);
+                    }
+                    Err(e) => {
+                        warn!("could not query ref {}: '{}'", v, e);
+                    }
+                }
+                /*let row = stm.query_row(&[v], |row| {
+                    let path = self
+                        .parse_store_path(&row.get::<usize, String>(0)?)
+                        .unwrap();
+                    Ok(path)
+                }).unwrap();
+                data.references.push(row);*/
             }
 
             trace!("{:?}", data);
@@ -355,214 +669,58 @@ impl crate::Store for LocalStore {
         }))
     }
 
-    fn add_temp_root<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    fn is_valid_path<'a>(
+        &'a self,
+        path: &'a StorePath,
+    ) -> LocalFutureObj<'a, Result<bool, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            warn!("add_temp_root not yet implemented for LocalStore");
-            Ok(())
-        }))
-    }
+            if path == "" {
+                return Err(StoreError::NotInStore {
+                    path: self.print_store_path(path),
+                });
+            }
 
-    fn delete_path<'a>(
-        &'a mut self,
-        path: &std::path::PathBuf,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.display().to_string();
-        LocalFutureObj::new(Box::new(async move {
-            warn!("delete_path not yet implemented for : {}", &path);
-            //unimplemented!("delete path"); // TODO: make less ugly
-
-            #[allow(unused_must_use)]
-            std::fs::remove_dir_all(&path);
-
+            /*let path = path.canonicalize();
+            if let Err(v) = &path {
+                if v.kind() == std::io::ErrorKind::NotFound {
+                    trace!("cannot canon path");
+                    return Ok(false);
+                }
+            }
+            let path = path?;
+            if path.parent().unwrap() != std::path::Path::new(&self.get_store_dir()) {
+                return Err(StoreError::NotInStore {
+                    path: path.to_string_lossy().to_string(),
+                });
+            }*/
+            let path = self.print_store_path(path);
             let sqlite = self.sqlite.write().unwrap();
-            sqlite.execute("DELETE FROM ValidPaths WHERE path = (?);", &[&path])?;
-            /*let mut stm = sqlite.prepare("DELETE FROM ValidPaths WHERE path = (?);")?;
+            let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
-            let data = stm.query_map(&[&path], |row| {
-                warn!("foobar");
-                Ok(())
-            }).unwrap();*/
+            let data = stm.query_row(&[&path], |row| Ok(true)).unwrap_or(false);
+            // TODO: check if path exists on disk
 
-            Ok(())
+            Ok(data)
         }))
     }
 
-    fn write_file<'a>(
-        &'a mut self,
-        path: &str,
-        data: &'a [u8],
-        executable: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_string();
-        LocalFutureObj::new(Box::new(async move {
-            let mut file = tokio::fs::File::create(path).await?;
+    fn box_clone_read(&self) -> Box<dyn ReadStore> {
+        Box::new(self.clone())
+    }
+}
 
-            use std::os::unix::fs::PermissionsExt;
-            let perms = if executable { 0o555 } else { 0o444 };
-            let perms = std::fs::Permissions::from_mode(perms);
-            file.set_permissions(perms).await?;
-
-            use tokio::io::AsyncWriteExt;
-            file.write_all(data).await?;
-            Ok(())
-        }))
+impl Store for Arc<LocalStore> {
+    fn get_state_dir<'a>(&'a self) -> Result<String, StoreError> {
+        Ok(format!("{}/var/nix/", self.base_dir))
     }
 
-    fn make_directory<'a>(&'a mut self, path: &str) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        let path = path.to_owned();
-        LocalFutureObj::new(Box::new(async move {
-            tokio::fs::create_dir_all(path).await?;
-            Ok(())
-        }))
+    fn get_store_dir<'a>(&'a self) -> Result<String, StoreError> {
+        Ok(format!("{}store", self.base_dir))
     }
 
-    /*fn write_regular_file<'a>(
-        &'a mut self,
-        path: &'a str,
-        data: &[u8],
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new( async move {
-            let file = tokio::fs::File::create(&path).await?; // TODO: rm befor create?
-
-            use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o444);
-            file.set_permissions(perms).await?;
-
-            Ok(())
-        }))
-    }*/
-
-    fn add_to_store<'a>(
-        &'a mut self,
-        path: super::ValidPathInfo,
-        repair: bool,
-        check_sigs: bool,
-    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            if let super::Hash::None = path.nar_hash {
-                return Err(StoreError::MissingHash {
-                    path: path.path.display().to_string(),
-                });
-            }
-            // TODO: return err if sig is missing
-
-            self.add_temp_root(&path.path.to_str().unwrap()).await?;
-
-            if repair || !self.is_valid_path(&path.path).await? {
-                self.delete_path(&path.path);
-
-                /*if path.ca.is_some() {
-                    let ca = path.ca.unwrap();
-                    if !ca.starts_with("text:") && path.references.len() == 0 || path.references.len() == 0
-                }*/
-
-                //if path.ca != "" && !(path.ca.starts_with("text:") && path.references.len() == 0) || path.references.len() == 0) TODO: what???
-                // requireFeature("ca-references")
-
-                //                self.registerValidPath(path).await?;
-
-                /* std::unique_ptr<AbstractHashSink> hashSink;
-                if (info.ca == "" || !info.references.count(info.path))
-                    hashSink = std::make_unique<HashSink>(htSHA256);
-                else
-                    hashSink = std::make_unique<HashModuloSink>(htSHA256, std::string(info.path.hashPart()));
-
-                LambdaSource wrapperSource([&](unsigned char * data, size_t len) -> size_t {
-                    size_t n = source.read(data, len);
-                    (*hashSink)(data, n);
-                    return n;
-                });
-
-                restorePath(realPath, wrapperSource);
-
-                auto hashResult = hashSink->finish();
-
-                if (hashResult.first != info.narHash)
-                    throw Error("hash mismatch importing path '%s';\n  wanted: %s\n  got:    %s",
-                        printStorePath(info.path), info.narHash.to_string(Base32, true), hashResult.first.to_string(Base32, true));
-
-                if (hashResult.second != info.narSize)
-                    throw Error("size mismatch importing path '%s';\n  wanted: %s\n  got:   %s",
-                        printStorePath(info.path), info.narSize, hashResult.second);
-
-                autoGC();
-
-                canonicalisePathMetaData(realPath, -1);
-
-                optimisePath(realPath); // FIXME: combine with hashPath()
-
-                registerValidPath(info); */
-            }
-
-            // outputLock.setDeletion
-
-            unimplemented!()
-        }))
+    fn box_clone(&self) -> Box<dyn Store> {
+        Box::new(self.clone())
     }
-    fn add_text_to_store<'a>(
-        &'a mut self,
-        suffix: &'a str,
-        data: &'a [u8],
-        refs: &'a Vec<String>,
-        repair: bool,
-    ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        LocalFutureObj::new(Box::new(async move {
-            let hash = ring::digest::digest(&ring::digest::SHA256, data);
-            let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
-
-            let dest_path = self.make_text_path(suffix, &hash, refs).await?;
-            trace!("will write texte to {}", dest_path);
-
-            self.add_temp_root(&dest_path).await?;
-
-            if repair
-                || !self
-                    .is_valid_path(&std::path::Path::new(&dest_path))
-                    .await?
-            {
-                // TODO: make realpath?
-
-                self.delete_path(&std::path::PathBuf::from(&dest_path));
-                let rm = tokio::fs::remove_file(&dest_path).await; // magic like moving to /nix/store/.thrash
-                trace!("rm: {:?}", rm);
-
-                //self.autoGC()
-
-                /*let mut file = tokio::fs::File::create(&dest_path).await?;
-                use tokio::io::AsyncWriteExt;
-                file.write_all(data).await?;
-
-                use std::os::unix::fs::PermissionsExt;
-                let perms = std::fs::Permissions::from_mode(0o444);
-                file.set_permissions(perms).await?;*/
-
-                /*file.sync_all().await?; // TODO: put behind settings*/
-                self.write_file(&dest_path, data, false).await?;
-
-                // dumpString(data)
-                let nar = crate::archive::dump_data(&data);
-                let hash = ring::digest::digest(&ring::digest::SHA256, &nar);
-                let hash = super::Hash::from_sha256_vec(hash.as_ref())?;
-
-                let mut info = ValidPathInfo::now(&dest_path, hash, nar.len() as u64)?;
-                // TODO: references, ca
-                let info = self.register_path(info).await?;
-                return Ok(info);
-            }
-
-            self.query_path_info(std::path::PathBuf::from(dest_path))
-                .await
-        }))
-    }
-
-    /*fn make_text_path<'a>(
-        &'a mut self,
-        suffix: &'a str,
-        hash: &'a super::Hash,
-        refs: &'a Vec<String>,
-    ) -> LocalFutureObj<'a, Result<String, StoreError>> {
-        LocalFutureObj::new(Box::new(async move { unimplemented!() }))
-    }*/
 }
 
 // FIXME
@@ -572,4 +730,105 @@ fn get_hash_part(path: &std::path::PathBuf) -> String {
 
     let pos = filename.find('-').unwrap();
     String::from(&filename[0..pos])
+}
+
+fn do_path<'a>(
+    path: StorePathWithOutputs,
+    state: Arc<std::sync::Mutex<super::MissingInfo>>,
+    store: Arc<LocalStore>,
+    substitute: bool,
+) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    LocalFutureObj::new(Box::new(async move {
+        let mut state_l = state.lock().unwrap();
+        if state_l.done.contains(&path.path.name()) {
+            return Ok(());
+        }
+        state_l.done.push(path.path.name());
+        drop(state_l);
+
+        println!("working on {}", path.path.name());
+
+        if path.path.is_derivation() {
+            if !store.is_valid_path(&path.path).await? {
+                //insert into unknown
+                // TODO: we could try to substitute the drv
+                let mut state_l = state.lock().unwrap();
+                state_l.unknown.push(path.path.clone());
+                return Ok(());
+            }
+            let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
+            let drv = crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
+
+            // TODO:
+            /*
+            PathSet invalid;
+            for (auto & j : drv->outputs)
+                if (wantOutput(j.first, path.outputs)
+                    && !isValidPath(j.second.path))
+                    invalid.insert(printStorePath(j.second.path));
+            if (invalid.empty()) return;*/
+            let mut invalid = crate::store::path::StorePaths::new();
+            for (name, out) in &drv.derivation.outputs {
+                if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
+                    trace!("adding {} to doto list", store.print_store_path(&out.path));
+                    invalid.push(out.path.clone());
+                }
+            }
+            if invalid.is_empty() {
+                return Ok(());
+            }
+
+            if substitute && drv.substitutes_allowed() {
+                for v in invalid {
+                    debug!("check for subst: {}", v);
+                    do_path(
+                        StorePathWithOutputs::new(v),
+                        state.clone(),
+                        store.clone(),
+                        substitute,
+                    )
+                    .await?;
+                    unimplemented!("qeue path");
+                    // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
+                }
+            } else {
+                unimplemented!("no substitute enabled");
+            }
+        } else {
+            warn!(
+                "non derivation path: {}",
+                store.print_store_path(&path.path)
+            );
+            /*
+            if (isValidPath(path.path)) return;
+
+            SubstitutablePathInfos infos;
+            querySubstitutablePathInfos({path.path}, infos);
+
+            if (infos.empty()) {
+                auto state(state_.lock());
+                state->unknown.insert(path.path);
+                return;
+            }
+
+            auto info = infos.find(path.path);
+            assert(info != infos.end());
+
+            {
+                auto state(state_.lock());
+                state->willSubstitute.insert(path.path);
+                state->downloadSize += info->second.downloadSize;
+                state->narSize += info->second.narSize;
+            }
+
+            for (auto & ref : info->second.references)
+                pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
+                */
+        }
+
+        /*return Err(StoreError::Unimplemented {
+            msg: "unimplemented".to_string(),
+        });*/
+        Ok(())
+    }))
 }
