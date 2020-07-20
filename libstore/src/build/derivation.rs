@@ -29,10 +29,14 @@ impl ParsedDerivation {
     }
 
     pub fn get_bool_attr(&self, name: &str) -> bool {
+        self.get_bool_attr_default(name, false)
+    }
+
+    pub fn get_bool_attr_default(&self, name: &str, default: bool) -> bool {
         // TODO: structuredAttrs
         self.get_string_attr(name)
             .map(|v| v == "1")
-            .unwrap_or(false)
+            .unwrap_or(default)
     }
 
     pub fn get_strings_attr(&self, name: &str) -> Option<Vec<String>> {
@@ -74,7 +78,7 @@ impl ParsedDerivation {
     }
 
     pub fn substitutes_allowed(&self) -> bool {
-        self.get_bool_attr("allowSubstitutes")
+        self.get_bool_attr_default("allowSubstitutes", true)
     }
 
     pub fn content_addressed(&self) -> bool {

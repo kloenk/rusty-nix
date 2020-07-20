@@ -135,7 +135,7 @@ impl BuildStore for Arc<LocalStore> {
             use std::sync::{Arc, Mutex};
             let state = Arc::new(Mutex::new(super::MissingInfo::new()));
 
-            let do_path = |path: &'a StorePathWithOutputs,
+            /*let do_path = |path: &'a StorePathWithOutputs,
                            state: Arc<Mutex<super::MissingInfo>>,
                            store: Arc<LocalStore>,
                            substitute: bool| async move {
@@ -171,6 +171,7 @@ impl BuildStore for Arc<LocalStore> {
                     let mut invalid = crate::store::path::StorePaths::new();
                     for (name, out) in &drv.derivation.outputs {
                         if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
+                            trace!("adding {} to doto list", self.print_store_path(&out.path));
                             invalid.push(out.path.clone());
                         }
                     }
@@ -181,11 +182,15 @@ impl BuildStore for Arc<LocalStore> {
                     if substitute && drv.substitutes_allowed() {
                         for v in invalid {
                             debug!("check for subst: {}", v);
+                            //do_path(v, state.clone(), store.clone(), substitute).await?;
                             unimplemented!("qeue path");
                             // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
                         }
+                    } else {
+                        unimplemented!("no substitute enabled");
                     }
                 } else {
+                    warn!("non derivation path: {}", self.print_store_path(&path.path));
                     /*
                     if (isValidPath(path.path)) return;
 
@@ -217,11 +222,12 @@ impl BuildStore for Arc<LocalStore> {
                     msg: "unimplemented".to_string(),
                 });*/
                 Ok(())
-            };
+            };*/
 
             let mut work = Vec::new();
             for v in paths {
-                work.push(do_path(v, state.clone(), self.clone(), true)); // TODO: substitute from settings
+                work.push(do_path(v.clone(), state.clone(), self.clone(), true));
+                // TODO: substitute from settings
             }
 
             let ret: Result<Vec<()>, StoreError> =
@@ -359,18 +365,30 @@ impl WriteStore for Arc<LocalStore> {
                     unimplemented!("feature ca-refernces: {}/{}", file!(), line!());
                 }*/
 
-                /*let base_path = format!("{}/.temp/{}", self.get_store_dir()?, path.path);
-                let nar = crate::archive::NarParser::new(&base_path, source, self.box_clone_write());
-                let nar = nar.parse().await;
-                println!("nar: {:?}", nar);*/
-
-                let temp = self.print_store_path(&path.path);
+                let out = self.print_store_path(&path.path);
 
                 con.set_tunnel(true);
                 con.set_hasher()?;
-                let parser = crate::archive::NarParser::new(&temp, con, self.box_clone_write());
+                // TODO: HashModuloSink
+                let parser = crate::archive::NarParser::new(&out, con, self.box_clone_write());
                 parser.parse().await.unwrap(); // TODO: parse error
 
+                con.set_tunnel(false);
+
+                let hasher = con.pop_hasher()?;
+                if hasher.hash != path.nar_hash
+                /*|| hasher.size != path.nar_size*/
+                {
+                    return Err(StoreError::HashMismatch {
+                        path: path.path.clone(),
+                    });
+                }
+
+                if hasher.size as u64 != path.nar_size.unwrap_or(0) {
+                    return Err(StoreError::HashMismatch {
+                        path: path.path.clone(),
+                    });
+                }
                 // TODO: checking
 
                 /*                autoGC();
@@ -380,11 +398,12 @@ impl WriteStore for Arc<LocalStore> {
                 optimisePath(realPath); // FIXME: combine with hashPath()
 
                 registerValidPath(info); */
+                self.register_path(path).await?;
             }
 
             // outputLock.setDeletion
 
-            unimplemented!()
+            Ok(())
         }))
     }
 
@@ -711,4 +730,105 @@ fn get_hash_part(path: &std::path::PathBuf) -> String {
 
     let pos = filename.find('-').unwrap();
     String::from(&filename[0..pos])
+}
+
+fn do_path<'a>(
+    path: StorePathWithOutputs,
+    state: Arc<std::sync::Mutex<super::MissingInfo>>,
+    store: Arc<LocalStore>,
+    substitute: bool,
+) -> LocalFutureObj<'a, Result<(), StoreError>> {
+    LocalFutureObj::new(Box::new(async move {
+        let mut state_l = state.lock().unwrap();
+        if state_l.done.contains(&path.path.name()) {
+            return Ok(());
+        }
+        state_l.done.push(path.path.name());
+        drop(state_l);
+
+        println!("working on {}", path.path.name());
+
+        if path.path.is_derivation() {
+            if !store.is_valid_path(&path.path).await? {
+                //insert into unknown
+                // TODO: we could try to substitute the drv
+                let mut state_l = state.lock().unwrap();
+                state_l.unknown.push(path.path.clone());
+                return Ok(());
+            }
+            let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
+            let drv = crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
+
+            // TODO:
+            /*
+            PathSet invalid;
+            for (auto & j : drv->outputs)
+                if (wantOutput(j.first, path.outputs)
+                    && !isValidPath(j.second.path))
+                    invalid.insert(printStorePath(j.second.path));
+            if (invalid.empty()) return;*/
+            let mut invalid = crate::store::path::StorePaths::new();
+            for (name, out) in &drv.derivation.outputs {
+                if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
+                    trace!("adding {} to doto list", store.print_store_path(&out.path));
+                    invalid.push(out.path.clone());
+                }
+            }
+            if invalid.is_empty() {
+                return Ok(());
+            }
+
+            if substitute && drv.substitutes_allowed() {
+                for v in invalid {
+                    debug!("check for subst: {}", v);
+                    do_path(
+                        StorePathWithOutputs::new(v),
+                        state.clone(),
+                        store.clone(),
+                        substitute,
+                    )
+                    .await?;
+                    unimplemented!("qeue path");
+                    // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
+                }
+            } else {
+                unimplemented!("no substitute enabled");
+            }
+        } else {
+            warn!(
+                "non derivation path: {}",
+                store.print_store_path(&path.path)
+            );
+            /*
+            if (isValidPath(path.path)) return;
+
+            SubstitutablePathInfos infos;
+            querySubstitutablePathInfos({path.path}, infos);
+
+            if (infos.empty()) {
+                auto state(state_.lock());
+                state->unknown.insert(path.path);
+                return;
+            }
+
+            auto info = infos.find(path.path);
+            assert(info != infos.end());
+
+            {
+                auto state(state_.lock());
+                state->willSubstitute.insert(path.path);
+                state->downloadSize += info->second.downloadSize;
+                state->narSize += info->second.narSize;
+            }
+
+            for (auto & ref : info->second.references)
+                pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
+                */
+        }
+
+        /*return Err(StoreError::Unimplemented {
+            msg: "unimplemented".to_string(),
+        });*/
+        Ok(())
+    }))
 }

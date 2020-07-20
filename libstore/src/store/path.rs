@@ -99,7 +99,7 @@ impl PartialOrd for StorePath {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StorePathWithOutputs {
     pub path: StorePath,
     pub outputs: Vec<String>,
