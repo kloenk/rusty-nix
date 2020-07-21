@@ -33,6 +33,11 @@ impl Ast {
         Ok(Self { def: ret })
     }
 
+    pub fn from_str(str: &str) -> Result<Self, StoreError> {
+        let drv = TokType::parse(str)?;
+        Self::from_lexer(drv)
+    }
+
     fn parse_tuple(
         it: &mut std::iter::Peekable<std::slice::Iter<TokType>>,
     ) -> Result<Vec<AstNode>, StoreError> {
@@ -110,6 +115,26 @@ pub enum AstNode {
     Empty,
 }
 
+impl AstNode {
+    pub fn to_string(&self) -> Result<String, StoreError> {
+        match &self {
+            AstNode::String(v) => Ok(v.clone()),
+            _ => Err(StoreError::InvalidDerivation {
+                msg: "node is not a string".to_string(),
+            }),
+        }
+    }
+
+    pub fn to_array(&self) -> Result<Vec<AstNode>, StoreError> {
+        match &self {
+            AstNode::Array(v) => Ok(v.clone()),
+            _ => Err(StoreError::InvalidDerivation {
+                msg: "node is not a array".to_string(),
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::{Ast, AstNode, StoreError, TokType};
@@ -154,12 +179,15 @@ mod test {
     #[test]
     /// like lex_and_ast_hello, but for gcc, as that drv is more complicated
     fn lex_and_ast_gcc() {
-        let drv = std::fs::read_to_string("./tests/gcc.drv").unwrap();
+        let drv_str = std::fs::read_to_string("./tests/gcc.drv").unwrap();
 
-        let drv = super::TokType::parse(&drv).unwrap();
+        let drv = super::TokType::parse(&drv_str).unwrap();
 
-        let drv = Ast::from_lexer(drv).unwrap();
+        let drv_1 = Ast::from_lexer(drv).unwrap();
+        let drv_2 = Ast::from_str(&drv_str).unwrap();
 
-        println!("ast: {:?}", drv);
+        assert_eq!(drv_1, drv_2);
+
+        println!("ast: {:?}", drv_1);
     }
 }

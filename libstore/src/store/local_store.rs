@@ -756,7 +756,7 @@ fn do_path<'a>(
                 state_l.unknown.push(path.path.clone());
                 return Ok(());
             }
-            let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
+            let drv = crate::build::derivation::Derivation::from_path(&path.path, &store).await?;
             let drv = crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
 
             // TODO:
