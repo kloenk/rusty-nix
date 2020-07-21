@@ -70,6 +70,10 @@ impl TokType {
                             '"' => {
                                 break;
                             }
+                            '\\' => {
+                                s.push(c);
+                                s.push(it.next().unwrap());
+                            }
                             _ => {
                                 s.push(c);
                             }
@@ -82,8 +86,7 @@ impl TokType {
                     return Err(StoreError::InvalidDerivation {
                         msg: format!("Invalid character: {}", c),
                     })
-                },
-                // TODO: allow spaces and newlines?
+                } // TODO: allow spaces and newlines?
             }
         }
 

@@ -7,6 +7,8 @@ use crate::store::{StoreError, StorePath};
 mod token;
 pub use token::TokType;
 
+mod ast;
+
 #[derive(Debug)]
 pub struct ParsedDerivation {
     pub drv_path: StorePath,
