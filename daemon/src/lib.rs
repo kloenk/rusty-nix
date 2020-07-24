@@ -224,14 +224,16 @@ impl NixDaemon {
 
         trace!("version an client matching");
 
-        let params = std::collections::HashMap::new();
+        //let params = std::collections::HashMap::new();
         // TODO: override settings via Params
 
-        let store = libstore::open_store_build(&store, params).await.unwrap();
+        //let store = libstore::open_store_build(&store, params).await.unwrap();
 
         let con = libstore::source::Connection::new(stream);
 
-        let connection = Connection::new(trusted, version, con, store, creds.uid, user);
+        let connection = Connection::new(trusted, version, con, &store, creds.uid, user)
+            .await
+            .unwrap();
 
         #[allow(clippy::single_match)] // TODO: add magic?
         match connection.run().await {

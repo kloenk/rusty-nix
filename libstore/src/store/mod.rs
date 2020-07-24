@@ -343,18 +343,19 @@ impl PartialEq for dyn Store {
     }
 }
 
+// FIXME: move into Connection??
 pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, StoreError> {
     let setting = crate::CONFIG.read().unwrap();
-    let mut ret = Vec::new();
+    let mut ret: Vec<Box<dyn ReadStore>> = Vec::new();
     use std::collections::HashMap;
-    let empty = HashMap::new();
+    //let empty = HashMap::new();
 
     for uri in &setting.substituters {
-        ret.push(open_store_read(uri, empty.clone()).await?);
+        //ret.push(open_store_read(uri, empty.clone()).await?);
     }
 
     for uri in &setting.extra_substituters {
-        ret.push(open_store_read(uri, empty.clone()).await?);
+        //ret.push(open_store_read(uri, empty.clone()).await?);
     }
 
     //ret.sort();
@@ -363,7 +364,7 @@ pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, Store
     Ok(ret)
 }
 
-pub async fn open_store_read(
+/*pub async fn open_store_read(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
 ) -> Result<Box<dyn ReadStore>, StoreError> {
@@ -389,7 +390,7 @@ pub async fn open_store_build(
     let path = &store_uri["file://".len()..];
     let store = local_store::LocalStore::open_store(path, params).await?;
     Ok(Box::new(store))
-}
+}*/
 
 /*pub fn print_store_path(v: &std::path::Path) -> String {
     // TODO: storeDir +

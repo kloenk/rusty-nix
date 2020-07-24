@@ -6,12 +6,50 @@ use log::*;
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
-use std::convert::TryFrom;
 
 use super::path::StorePathWithOutputs;
 use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
 
 use std::sync::{Arc, RwLock};
+
+#[derive(Debug)]
+pub struct LocalStoreOpener {}
+
+impl LocalStoreOpener {
+    pub fn new() -> Box<Self> {
+        Box::new(Self {})
+    }
+}
+
+impl crate::plugin::StoreOpener for LocalStoreOpener {
+    fn open_reader<'a>(
+        &'a self,
+        uri: &'a str,
+        params: std::collections::HashMap<String, crate::store::Param>,
+    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let store = self.open_builder(uri, params).await?;
+            Ok(store.box_clone_read())
+            //return Ok(self.open_builder(uri, params).await? as Box<dyn ReadStore>);
+        }))
+    }
+
+    fn open_builder<'a>(
+        &'a self,
+        uri: &'a str,
+        params: std::collections::HashMap<String, crate::store::Param>,
+    ) -> LocalFutureObj<'a, Result<Box<dyn BuildStore>, StoreError>> {
+        log::info!("opening local store: {}", uri);
+        LocalFutureObj::new(Box::new(async move {
+            let uri = match uri {
+                "auto" => "/nix/",
+                _ => uri,
+            };
+            let store = LocalStore::open_store(uri, params).await?;
+            return Ok(Box::new(store) as Box<dyn BuildStore>);
+        }))
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -28,8 +66,7 @@ impl LocalStore {
         params: std::collections::HashMap<String, super::Param>,
     ) -> Result<Arc<Self>, crate::error::StoreError> {
         // TODO: access checks?
-        trace!("opening local store {}", path);
-        trace!("got params: {:?}", params);
+        trace!("got params for LocalStore: {:?}", params);
         std::fs::create_dir_all(path)?;
 
         let sqlite = Arc::new(RwLock::new(rusqlite::Connection::open(&format!(

@@ -14,7 +14,9 @@ custom_error! {
         Io{source: io::Error} = "IoError: {source}",
         StringToLong{len: usize} = "string is to long",
         ConnectionError{source: ConnectionError} = "ConnectionError: {source}",
+        PluginError{source: PluginError } = "PluginError: {source}",
         InvalidStoreUri{uri: String} = "InvalidStoreUri: {uri}",
+        NoStore{name: String} = "The Store {name} does not exists",
         NotInStore{path: String} = "path \"{path}\" is not in the Nix store",
         UtilError{source: libutil::error::UtilError} = "UtilError: {source}",
         SqlError{source: rusqlite::Error} = "SQLError: {source}",
@@ -68,4 +70,9 @@ custom_error! {
         UserNotExisting{ user: String } = "the user '{user}' does not exist",
         UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
         SysError{ msg: String } = "SysError {msg}",
+}
+
+custom_error! {
+    pub PluginError
+        Io{source: std::io::Error} = "IO: {source}",
 }

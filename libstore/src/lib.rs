@@ -1,20 +1,22 @@
-pub mod connection;
-pub mod error;
-
-pub mod store;
-
-pub mod crypto;
-
 pub mod archive;
-
-pub mod source;
 
 pub mod build;
 
+pub mod connection;
+
+pub mod crypto;
+
+pub mod error;
+
 pub mod gc;
 
+pub mod plugin;
+
+pub mod source;
+
+pub mod store;
+
 pub use error::StoreError;
-pub use store::open_store_build;
 pub use store::Store;
 
 use lazy_static::lazy_static;

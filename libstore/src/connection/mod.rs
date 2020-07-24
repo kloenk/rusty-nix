@@ -66,24 +66,31 @@ pub struct Connection {
     u_name: String,
 
     store: Box<dyn crate::store::BuildStore>,
+    plugins: crate::plugin::PluginRegistry,
 }
 
 impl Connection {
-    pub fn new(
+    pub async fn new(
         trusted: bool,
         client_version: u16,
         con: crate::source::Connection,
-        store: Box<dyn crate::store::BuildStore>,
+        store: &str, //Box<dyn crate::store::BuildStore>,
         uid: u32,
         u_name: String,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, StoreError> {
+        let plugins = crate::plugin::PluginRegistry::new()?;
+        let store = plugins
+            .open_store_build(store, std::collections::HashMap::new())
+            .await?;
+
+        Ok(Self {
             trusted,
             con,
             store,
             uid,
             u_name,
-        }
+            plugins,
+        })
     }
 
     pub async fn run(mut self) -> Result<(), crate::error::StoreError> {
