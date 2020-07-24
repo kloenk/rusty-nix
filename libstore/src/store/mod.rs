@@ -92,6 +92,18 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
         }))
     }
 
+    fn qurey_substitutable_path_infos<'a>(
+        &'a self,
+        path: &'a path::StorePaths,
+    ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
+        LocalFutureObj::new(Box::new(async move { Ok(None) }))
+    }
+
+    fn ensure_path<'a>(
+        &'a self,
+        path: &'a path::StorePathWithOutputs,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
+
     fn box_clone_build(&self) -> Box<dyn BuildStore>;
 }
 
@@ -255,6 +267,19 @@ pub trait ReadStore: Store {
     fn box_clone_read(&self) -> Box<dyn ReadStore>;
 }
 
+impl PartialOrd for dyn ReadStore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        //Some(self.cmp(other))
+        self.priority().partial_cmp(&other.priority())
+    }
+}
+
+impl PartialEq for dyn ReadStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority() == other.priority()
+    }
+}
+
 /// This is the main store Trait, needed by every kind of store.
 /// Every Store has to implement Clone. If a store has some data which in mutable inside it has to handle it itself.
 pub trait Store {
@@ -298,10 +323,54 @@ pub trait Store {
         format!("{}/{}", self.get_store_dir().unwrap(), path)
     }
 
+    fn priority<'a>(&'a self) -> u64 {
+        0
+    }
+
     fn box_clone(&self) -> Box<dyn Store>;
 }
 
-pub async fn open_store(
+impl PartialOrd for dyn Store {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        //Some(self.cmp(other))
+        self.priority().partial_cmp(&other.priority())
+    }
+}
+
+impl PartialEq for dyn Store {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority() == other.priority()
+    }
+}
+
+pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, StoreError> {
+    let setting = crate::CONFIG.read().unwrap();
+    let mut ret = Vec::new();
+    use std::collections::HashMap;
+    let empty = HashMap::new();
+
+    for uri in &setting.substituters {
+        ret.push(open_store_read(uri, empty.clone()).await?);
+    }
+
+    for uri in &setting.extra_substituters {
+        ret.push(open_store_read(uri, empty.clone()).await?);
+    }
+
+    //ret.sort();
+    ret.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    Ok(ret)
+}
+
+pub async fn open_store_read(
+    store_uri: &str,
+    params: std::collections::HashMap<String, Param>,
+) -> Result<Box<dyn ReadStore>, StoreError> {
+    unimplemented!()
+}
+
+pub async fn open_store_build(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
 ) -> Result<Box<dyn BuildStore>, StoreError> {

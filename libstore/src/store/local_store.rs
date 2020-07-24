@@ -239,6 +239,42 @@ impl BuildStore for Arc<LocalStore> {
         }))
     }
 
+    fn ensure_path<'a>(
+        &'a self,
+        path: &'a StorePathWithOutputs,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if self.is_valid_path(&path.path).await? {
+                return Ok(());
+            }
+
+            self.prime_cache(&vec![path.clone()]).await?;
+
+            unimplemented!();
+            Ok(())
+        }))
+    }
+
+    fn qurey_substitutable_path_infos<'a>(
+        &'a self,
+        path: &'a super::path::StorePaths,
+    ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let setting = crate::CONFIG.read().unwrap();
+            let setting = setting.substitute;
+            if !setting {
+                return Ok(None);
+            }
+
+            for s in super::get_default_substituters().await? {
+                if s.get_store_dir()? != self.get_store_dir()? {
+                    continue;
+                }
+            }
+            unimplemented!()
+        }))
+    }
+
     fn box_clone_build(&self) -> Box<dyn BuildStore> {
         Box::new(self.clone())
     }
@@ -279,7 +315,17 @@ impl WriteStore for Arc<LocalStore> {
         target: &'a str,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            unimplemented!();
+            // tokio::fs::os::unix::symlink(source, target).await?;
+            // std::os::unix::fs::symlink(source, target)?;
+            // both above are failing if symlink is dangling at creation. so fallback to libc
+            let source = std::ffi::CString::new(source).unwrap();
+            let target = std::ffi::CString::new(target).unwrap();
+            if unsafe { libc::symlink(target.as_ptr(), source.as_ptr()) } != 0 {
+                return Err(StoreError::Io {
+                    source: std::io::Error::last_os_error(),
+                });
+            }
+            Ok(())
         }))
     }
 
@@ -694,6 +740,9 @@ impl ReadStore for Arc<LocalStore> {
                 });
             }*/
             let path = self.print_store_path(path);
+            if !std::path::Path::new(&path).exists() {
+                return Ok(false);
+            }
             let sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
@@ -788,17 +837,15 @@ fn do_path<'a>(
                         substitute,
                     )
                     .await?;
-                    unimplemented!("qeue path");
                     // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
                 }
             } else {
                 unimplemented!("no substitute enabled");
             }
         } else {
-            warn!(
-                "non derivation path: {}",
-                store.print_store_path(&path.path)
-            );
+            if store.is_valid_path(&path.path).await? {
+                return Ok(());
+            }
             /*
             if (isValidPath(path.path)) return;
 
@@ -824,6 +871,11 @@ fn do_path<'a>(
             for (auto & ref : info->second.references)
                 pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
                 */
+
+            warn!(
+                "non derivation path: {}",
+                store.print_store_path(&path.path)
+            );
         }
 
         /*return Err(StoreError::Unimplemented {

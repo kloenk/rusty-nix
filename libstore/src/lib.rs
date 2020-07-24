@@ -14,7 +14,7 @@ pub mod build;
 pub mod gc;
 
 pub use error::StoreError;
-pub use store::open_store;
+pub use store::open_store_build;
 pub use store::Store;
 
 use lazy_static::lazy_static;

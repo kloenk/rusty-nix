@@ -227,7 +227,7 @@ impl NixDaemon {
         let params = std::collections::HashMap::new();
         // TODO: override settings via Params
 
-        let store = libstore::open_store(&store, params).await.unwrap();
+        let store = libstore::open_store_build(&store, params).await.unwrap();
 
         let con = libstore::source::Connection::new(stream);
 

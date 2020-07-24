@@ -46,14 +46,20 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
             return Err(NarError::NotAArchive {});
         }
 
-        self.inner_parser(self.base_path.to_owned()).await.await?;
+        self.inner_parser(self.base_path.to_owned(), &self.base_path)
+            .await
+            .await?;
 
         Ok(NarResult {
             // TODO: fix
         })
     }
 
-    pub async fn inner_parser(&'a self, path: String) -> LocalFutureObj<'a, Result<(), NarError>> {
+    pub async fn inner_parser(
+        &'a self,
+        path: String,
+        base_path: &'a str,
+    ) -> LocalFutureObj<'a, Result<(), NarError>> {
         LocalFutureObj::new(Box::new(async move {
             let tag = self.reader.read_string().await?;
             if tag != "(" {
@@ -91,7 +97,10 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             if target != "target" {
                                 return Err(NarError::InvalidSymlinkMarker { marker: target });
                             }
-                            let target = self.reader.read_string().await?;
+                            //let mut target = base_path.to_string();
+                            //target.push_str(&self.reader.read_string().await?);
+                            let target =
+                                format!("{}/{}", base_path, self.reader.read_string().await?);
                             debug!("creating symlink: '{} -> {}'", path, target);
                             self.store.make_symlink(&path, &target).await?;
                             State::None // state not needed here
@@ -152,7 +161,7 @@ impl<'a, T: ?Sized + AsyncRead + Unpin> NarParser<'a, T> {
                             if name.is_empty() {
                                 return Err(NarError::MissingName {});
                             }
-                            self.inner_parser(format!("{}/{}", path, name))
+                            self.inner_parser(format!("{}/{}", path, name), base_path)
                                 .await
                                 .await?;
                         }

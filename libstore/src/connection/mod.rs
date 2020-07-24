@@ -412,8 +412,10 @@ impl Connection {
         let path = self.con.read_string().await?;
         trace!("ensure path {}", path);
 
+        let path = self.store.parse_store_path_with_outputs(&path)?;
+
         self.con.start_work().await?;
-        //self.store.ensure_path(path).await?; // TODO: implement
+        self.store.ensure_path(&path).await?; // TODO: implement
         self.con.stop_work(WORKDONE).await?;
 
         self.con.write_u64(1).await?;
