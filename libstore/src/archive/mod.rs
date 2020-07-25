@@ -378,7 +378,10 @@ mod test {
         assert!(b.is_file_executable("/mock/dir/exe"));
 
         assert!(b.link_exists("/mock/dir/exe_symlink"));
-        assert_eq!(b.symlinks_points_at("/mock/dir/exe_symlink"), "/mock/dir/exe");
+        assert_eq!(
+            b.symlinks_points_at("/mock/dir/exe_symlink"),
+            "/mock/dir/exe"
+        );
 
         //assert_eq!(ret.len, 712);
         //assert_eq!(

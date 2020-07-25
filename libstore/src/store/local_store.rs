@@ -804,6 +804,14 @@ impl Store for Arc<LocalStore> {
         Ok(format!("{}store", self.base_dir))
     }
 
+    fn priority<'a>(&'a self) -> u64 {
+        0
+    }
+
+    fn capability<'a>(&'a self) -> super::StoreCap {
+        super::StoreCap::Build
+    }
+
     fn box_clone(&self) -> Box<dyn Store> {
         Box::new(self.clone())
     }

@@ -37,6 +37,7 @@ custom_error! {
         InvalidDerivation{ msg: String } = "InvalidDerivation: {msg}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
         BadBase32 = "Bad base 32 structure",
+        MissingCap{ cap: crate::store::StoreCap } = "Not Supperted: {cap}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }

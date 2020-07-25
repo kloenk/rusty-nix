@@ -3,18 +3,32 @@ use std::collections::HashMap;
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
 
+macro_rules! MissingCap {
+    ($arg:expr) => {
+        LocalFutureObj::new(Box::new(async move {
+            Err($crate::error::StoreError::MissingCap { cap: $arg })
+        }))
+    };
+}
+
 pub trait StoreOpener {
     fn open_reader<'a>(
         &'a self,
         uri: &'a str,
         params: std::collections::HashMap<String, crate::store::Param>,
-    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, crate::error::StoreError>>;
+    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, crate::error::StoreError>>
+    {
+        MissingCap!(crate::store::StoreCap::Read)
+    }
 
     fn open_builder<'a>(
         &'a self,
         uri: &'a str,
         params: std::collections::HashMap<String, crate::store::Param>,
-    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::BuildStore>, crate::error::StoreError>>;
+    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::BuildStore>, crate::error::StoreError>>
+    {
+        MissingCap!(crate::store::StoreCap::Build)
+    }
 }
 
 pub struct PluginRegistry {

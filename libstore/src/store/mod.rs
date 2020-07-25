@@ -324,7 +324,11 @@ pub trait Store {
     }
 
     fn priority<'a>(&'a self) -> u64 {
-        0
+        100
+    }
+
+    fn capability<'a>(&'a self) -> StoreCap {
+        StoreCap::None
     }
 
     fn box_clone(&self) -> Box<dyn Store>;
@@ -396,6 +400,26 @@ pub async fn open_store_build(
     // TODO: storeDir +
     v.display().to_string()
 }*/
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum StoreCap {
+    None,
+    Read,
+    Write,
+    Build,
+}
+
+impl std::fmt::Display for StoreCap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cap = match self {
+            StoreCap::None => "None",
+            StoreCap::Read => "Read",
+            StoreCap::Write => "Write",
+            StoreCap::Build => "Build",
+        };
+        write!(f, "{}", cap)
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
