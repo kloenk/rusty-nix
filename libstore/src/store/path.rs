@@ -147,7 +147,7 @@ impl std::convert::From<super::ValidPathInfo> for SubstitutablePathInfo {
     fn from(v: super::ValidPathInfo) -> Self {
         Self {
             deriver: v.deriver,
-            donwload_size: None, // FIXME
+            donwload_size: v.binary_info.map(|v| v.file_size).flatten(),
             references: v.references,
             nar_size: v.nar_size,
         }

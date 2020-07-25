@@ -935,36 +935,33 @@ fn do_path<'a>(
             let infos = store
                 .qurey_substitutable_path_infos(&vec![path.path.clone()], &plugin_reg)
                 .await?;
-            println!("info: {:?}", infos);
-            /*
 
-            SubstitutablePathInfos infos;
-            querySubstitutablePathInfos({path.path}, infos);
-
-            if (infos.empty()) {
-                auto state(state_.lock());
-                state->unknown.insert(path.path);
-                return;
+            if infos.len() == 0 {
+                let mut state_l = state.lock().unwrap();
+                state_l.unknown.push(path.path);
+                return Ok(());
             }
 
-            auto info = infos.find(path.path);
-            assert(info != infos.end());
+            assert_eq!(infos.len(), 1);
 
-            {
-                auto state(state_.lock());
-                state->willSubstitute.insert(path.path);
-                state->downloadSize += info->second.downloadSize;
-                state->narSize += info->second.narSize;
+            let infos: super::path::SubstitutablePathInfo = infos[0].clone();
+
+            let mut state_l = state.lock().unwrap();
+            state_l.will_substitute.push(path.path.clone());
+            state_l.download_size += infos.donwload_size.unwrap_or(0);
+            state_l.nar_size += infos.nar_size.unwrap_or(0);
+            drop(state_l);
+
+            for v in infos.references {
+                do_path(
+                    path.clone(),
+                    state.clone(),
+                    store.clone(),
+                    substitute,
+                    plugin_reg.clone(),
+                )
+                .await?;
             }
-
-            for (auto & ref : info->second.references)
-                pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
-                */
-
-            warn!(
-                "non derivation path: {}",
-                store.print_store_path(&path.path)
-            );
         }
 
         /*return Err(StoreError::Unimplemented {
