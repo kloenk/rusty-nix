@@ -24,11 +24,12 @@ impl LocalStoreOpener {
 impl crate::plugin::StoreOpener for LocalStoreOpener {
     fn open_reader<'a>(
         &'a self,
+        kind: &'a str,
         uri: &'a str,
         params: std::collections::HashMap<String, crate::store::Param>,
     ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            let store = self.open_builder(uri, params).await?;
+            let store = self.open_builder(kind, uri, params).await?;
             Ok(store.box_clone_read())
             //return Ok(self.open_builder(uri, params).await? as Box<dyn ReadStore>);
         }))
@@ -36,6 +37,7 @@ impl crate::plugin::StoreOpener for LocalStoreOpener {
 
     fn open_builder<'a>(
         &'a self,
+        _kind: &'a str,
         uri: &'a str,
         params: std::collections::HashMap<String, crate::store::Param>,
     ) -> LocalFutureObj<'a, Result<Box<dyn BuildStore>, StoreError>> {

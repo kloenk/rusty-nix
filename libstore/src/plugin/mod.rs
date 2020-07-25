@@ -16,6 +16,7 @@ macro_rules! MissingCap {
 pub trait StoreOpener {
     fn open_reader<'a>(
         &'a self,
+        _type: &'a str,
         _uri: &'a str,
         _params: std::collections::HashMap<String, crate::store::Param>,
     ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, crate::error::StoreError>>
@@ -25,6 +26,7 @@ pub trait StoreOpener {
 
     fn open_builder<'a>(
         &'a self,
+        _type: &'a str,
         _uri: &'a str,
         _params: std::collections::HashMap<String, crate::store::Param>,
     ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::BuildStore>, crate::error::StoreError>>
@@ -57,6 +59,12 @@ impl PluginRegistry {
                 opener: crate::store::local_store::LocalStoreOpener::new(),
             }),
         );
+        let binary = Rc::new(StorePlugin {
+            opener: crate::store::binary::BinaryStoreOpener::new(),
+            cap: crate::store::StoreCap::Read, // FIXME: Write
+        });
+        ret.stores.insert("https".to_string(), binary.clone());
+        ret.stores.insert("http".to_string(), binary);
 
         let conf = crate::CONFIG.read().unwrap();
         let conf = conf.plugin_files.clone();
@@ -81,7 +89,7 @@ impl PluginRegistry {
                         .get("file")
                         .unwrap()
                         .opener
-                        .open_reader(uri[0], params)
+                        .open_reader("", uri[0], params)
                         .await
                 } else {
                     unimplemented!("non auto store");
@@ -99,7 +107,7 @@ impl PluginRegistry {
                         cap: crate::store::StoreCap::Read,
                     });
                 }
-                store.opener.open_reader(uri[1], params).await
+                store.opener.open_reader(uri[0], uri[1], params).await
             }
             _ => unreachable!(),
         }
@@ -119,7 +127,7 @@ impl PluginRegistry {
                         .get("file")
                         .unwrap()
                         .opener
-                        .open_builder(uri[0], params)
+                        .open_builder("", uri[0], params)
                         .await
                 } else {
                     unimplemented!("non auto store");
@@ -137,7 +145,7 @@ impl PluginRegistry {
                         cap: crate::store::StoreCap::Read,
                     });
                 }
-                store.opener.open_builder(uri[1], params).await
+                store.opener.open_builder(uri[0], uri[1], params).await
             }
             _ => unreachable!(),
         }

@@ -39,6 +39,8 @@ custom_error! {
         BadBase32 = "Bad base 32 structure",
         MissingCap{ cap: crate::store::StoreCap } = "Not Supperted: {cap}",
 
+        Reqwest{source: reqwest::Error} = "Reqwest: {source}",
+
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
 

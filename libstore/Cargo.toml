@@ -22,6 +22,7 @@ ring = { version = "*", features = [ "std", "dev_urandom_fallback" ] }
 lazy_static = "*"
 data-encoding = "*"
 nix = "*"
+reqwest = { version = "*", features = [ "rustls-tls", "gzip", "brotli", "stream" ], default-features = false }
 
 libutil = { path = "../libutil" }
 

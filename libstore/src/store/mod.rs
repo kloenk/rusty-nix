@@ -12,6 +12,7 @@ pub use crate::error::StoreError;
 
 use chrono::NaiveDateTime;
 
+pub mod binary;
 pub mod local_store;
 pub mod protocol;
 
