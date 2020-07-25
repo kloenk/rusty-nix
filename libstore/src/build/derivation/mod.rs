@@ -277,7 +277,7 @@ mod test {
     async fn read_basic_drv() {
         let drv = HELLO_DRV;
 
-        let store = std::sync::Arc::new(crate::store::mock_store::MockStore::new());
+        let store = crate::store::mock_store::MockStore::new();
 
         //let drv = super::Derivation::from_reader(drv).await.unwrap();
         let drv = super::Derivation::from_str(drv, &store).unwrap();

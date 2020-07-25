@@ -56,7 +56,12 @@ impl BinaryStore {
         info!("opening BinaryStore at {}", base_uri);
         trace!("got params for binarystore: {:?}", params);
 
-        let client = Client::new();
+        //let client = Client::new();
+        let client = Client::builder();
+        let client = client.user_agent(format!("nix/{}", env!("CARGO_PKG_VERSION")));
+        let client = client.timeout(std::time::Duration::from_secs(5)); // FIXME: config
+
+        let client = client.build()?;
 
         let uri = format!("{}nix-cache-info", base_uri);
         let response = client.get(&uri).send().await?;
@@ -106,7 +111,29 @@ impl ReadStore for Arc<BinaryStore> {
         &'a self,
         path: &'a StorePath,
     ) -> LocalFutureObj<'a, Result<ValidPathInfo, StoreError>> {
-        unimplemented!()
+        LocalFutureObj::new(Box::new(async move {
+            // TODO: handle disabled
+            let uri = format!("{}{}.narinfo", self.base_uri, path.hash_part());
+
+            let response = self.client.get(&uri).send().await?;
+
+            if response.status() == reqwest::StatusCode::NOT_FOUND
+                || response.status() == reqwest::StatusCode::FORBIDDEN
+            {
+                warn!(
+                    "got non nice status coder for '{}': {}",
+                    uri,
+                    response.status()
+                );
+                return Err(StoreError::NotInStore {
+                    path: self.print_store_path(path),
+                });
+            }
+
+            let body = response.text().await?;
+
+            ValidPathInfo::parse_str(&body, self)
+        }))
     }
 
     fn is_valid_path<'a>(
@@ -128,6 +155,10 @@ impl Store for Arc<BinaryStore> {
 
     fn get_store_dir<'a>(&'a self) -> Result<String, StoreError> {
         Ok(self.store_dir.to_string())
+    }
+
+    fn get_uri<'a>(&'a self) -> String {
+        self.base_uri.clone()
     }
 
     fn priority<'a>(&'a self) -> u64 {

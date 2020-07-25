@@ -269,7 +269,6 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let store = std::sync::Arc::new(store);
         let box_store = Box::new(store.clone());
 
         // this is skipped in rustfmt to see packet boundings
@@ -303,7 +302,6 @@ mod test {
             _ => (),
         }
         let store = MockStore::new();
-        let store = std::sync::Arc::new(store);
 
         let reader = vec![
             // created via `nix dump-path`

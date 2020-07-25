@@ -307,23 +307,45 @@ impl BuildStore for Arc<LocalStore> {
         &'a self,
         path: &'a super::path::StorePaths,
         plugin_reg: &'a crate::plugin::PluginRegistry,
-    ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
+    ) -> LocalFutureObj<'a, Result<super::path::SubstitutablePathInfos, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             let setting = crate::CONFIG.read().unwrap();
             let setting = setting.substitute;
             if !setting {
-                return Ok(None);
+                return Ok(Vec::new());
             }
 
             //let subs: Vec<Box<dyn ReadStore>> = Vec::new();
+            let mut infos = super::path::SubstitutablePathInfos::new();
+            let mut done = super::path::StorePaths::new();
             let subs = plugin_reg.open_default_substituters().await?;
+            let do_sub = crate::CONFIG.read().unwrap();
+            let do_sub = do_sub.substitute;
 
             for s in subs {
                 if s.get_store_dir()? != self.get_store_dir()? {
                     continue;
                 }
+                for path in path {
+                    if done.contains(path) {
+                        continue;
+                    }
+                    debug!(
+                        "checking substituter '{}' for path '{}'",
+                        s.get_uri(),
+                        s.print_store_path(path)
+                    );
+                    let info = s.query_path_info(path).await;
+                    if do_sub && info.is_err() {
+                        continue;
+                    } else if info.is_err() {
+                        return Err(info.unwrap_err());
+                    }
+                    infos.push(info.unwrap().into());
+                    done.push(path.clone());
+                }
             }
-            unimplemented!()
+            Ok(infos)
         }))
     }
 
@@ -717,6 +739,7 @@ impl ReadStore for Arc<LocalStore> {
                     ultimate,
                     sigs,
                     ca,
+                    binary_info: None,
                 }) // TODO: return valid Path Info
             })?;
 
@@ -909,9 +932,11 @@ fn do_path<'a>(
                 return Ok(());
             }
 
-            let foo = plugin_reg.open_default_substituters().await?;
+            let infos = store
+                .qurey_substitutable_path_infos(&vec![path.path.clone()], &plugin_reg)
+                .await?;
+            println!("info: {:?}", infos);
             /*
-            if (isValidPath(path.path)) return;
 
             SubstitutablePathInfos infos;
             querySubstitutablePathInfos({path.path}, infos);

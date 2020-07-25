@@ -46,6 +46,9 @@ pub struct ValidPathInfo {
          makeFixedOutputPath() / addToStore().
     */
     pub ca: Option<String>,
+
+    /// Info for a binary store
+    pub binary_info: Option<BinaryPathInfo>,
 }
 
 impl ValidPathInfo {
@@ -61,7 +64,62 @@ impl ValidPathInfo {
             ultimate: false,
             sigs: Vec::new(),
             ca: None,
+            binary_info: None,
         }
+    }
+
+    pub fn parse_str(str: &str, store: &dyn Store) -> Result<ValidPathInfo, StoreError> {
+        let mut lines = str.lines();
+        let store_path: Vec<&str> = lines
+            .next()
+            .map(|v| v.split(": ").map(|v| v.trim()).collect())
+            .unwrap_or_default();
+        println!("store_path: {:?}", store_path);
+        if store_path.len() != 2 || !store_path[0].eq("StorePath") {
+            unreachable!() // FIXME: better error
+                           //return Err();
+        }
+
+        let store_path = store_path[1];
+        let store_path = store.parse_store_path(store_path)?;
+
+        let mut ret = Self::new(store_path);
+        let mut bin_info = BinaryPathInfo::new();
+
+        for l in lines {
+            let parts: Vec<&str> = l.split(": ").map(|v| v.trim()).collect();
+            if parts.len() == 0 {
+                continue;
+            } else if parts.len() != 2 {
+                log::warn!("invaid narInfo parts: {:?}", parts);
+                unimplemented!()
+            }
+            log::trace!("narInfo: {}: {}", parts[0], parts[1]);
+            use std::convert::TryFrom;
+            match parts[0] {
+                "NarHash" => ret.nar_hash = Hash::try_from(parts[1])?, //Hash::from_sql_string(parts[1])?,
+                "NarSize" => ret.nar_size = parts[1].parse().ok(),
+                "References" => {
+                    ret.references = parts[1]
+                        .split(' ')
+                        .map(|v| StorePath::new(v))
+                        .collect::<Result<Vec<StorePath>, StoreError>>()?
+                }
+                "Deriver" => ret.deriver = StorePath::new(parts[1]).ok(),
+                "Sig" => ret.sigs = parts[1].split(' ').map(|v| v.to_string()).collect(),
+                "URL" => bin_info.url = parts[1].to_string(),
+                "FileSize" => bin_info.file_size = parts[1].parse().ok(),
+                "Compression" => bin_info.compression = Compression::try_from(parts[1])?,
+                "FileHash" => bin_info.file_hash = Hash::try_from(parts[1])?,
+                _ => log::warn!("what is the field '{}'?", parts[0]),
+            }
+        }
+
+        if !bin_info.is_empty() {
+            ret.binary_info = Some(bin_info);
+        }
+
+        Ok(ret)
     }
 
     pub fn now(path: StorePath, hash: Hash, size: u64) -> Result<ValidPathInfo, StoreError> {
@@ -78,6 +136,7 @@ impl ValidPathInfo {
             id: 0,
             sigs: Vec::new(),
             ultimate: false,
+            binary_info: None,
         })
     }
     /// Return a fingerprint of the store path to be used in binary
@@ -173,6 +232,7 @@ impl std::convert::From<String> for ValidPathInfo {
             ultimate: false,
             sigs: Vec::new(),
             ca: None,
+            binary_info: None,
         }
     }
 }
@@ -196,3 +256,100 @@ impl PartialEq for ValidPathInfo {
     }
 }
 impl Eq for ValidPathInfo {}
+
+#[derive(Debug, Clone)]
+pub struct BinaryPathInfo {
+    pub compression: Compression,
+    pub url: String,
+    pub file_hash: Hash,
+    pub file_size: Option<u64>,
+}
+
+impl BinaryPathInfo {
+    pub fn new() -> Self {
+        Self {
+            compression: Compression::None,
+            url: String::new(),
+            file_hash: Hash::None,
+            file_size: None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        if self.compression == Compression::None
+            && self.url == ""
+            && self.file_hash == Hash::None
+            && self.file_size == None
+        {
+            true
+        } else {
+            false
+        }
+    }
+}
+
+impl PartialEq for BinaryPathInfo {
+    fn eq(&self, other: &BinaryPathInfo) -> bool {
+        self.file_hash == other.file_hash
+    }
+}
+
+impl Eq for BinaryPathInfo {}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub enum Compression {
+    XZ,
+    None,
+}
+
+use std::convert::TryFrom;
+
+impl TryFrom<&str> for Compression {
+    type Error = StoreError;
+
+    fn try_from(v: &str) -> Result<Self, Self::Error> {
+        match v {
+            "xz" => Ok(Compression::XZ),
+            _ => Err(StoreError::Unimplemented {
+                msg: "non xz comperssion".to_string(),
+            }),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::StorePath;
+    use super::ValidPathInfo;
+    use crate::store::mock_store::MockStore;
+    #[test]
+    fn from_str() {
+        match env_logger::try_init() {
+            // this may file because of previos test
+            _ => (),
+        }
+
+        let str = r#"StorePath: /nix/store/m1a7l5663wfrp36myxwmk61yc546zkqf-libnfc-1.7.1
+URL: nar/0klbnh0bsy8mc2pc875dfv01n9yc8d9rrchgq1ikfmv7g0p46fbg.nar.xz
+Compression: xz
+FileHash: sha256:0klbnh0bsy8mc2pc875dfv01n9yc8d9rrchgq1ikfmv7g0p46fbg
+FileSize: 121344
+NarHash: sha256:1ym9fi02fpy694b8qzx4rzf0ysl24m1783yhj0rijl2cxjd7bbf5
+NarSize: 582352
+References: bqbg6hb2jsl3kvf6jgmgfdqy06fpjrrn-glibc-2.30 hky7c4s917r4sp5iff5f8vh1qdmys2z8-libusb-compat-0.1.7 m1a7l5663wfrp36myxwmk61yc546zkqf-libnfc-1.7.1
+Deriver: kabgla47hqvkq7i83d46x06ljxq042zf-libnfc-1.7.1.drv
+Sig: cache.nixos.org-1:k+3WgwIvPX+cgvmpY3aSj6l0zV0D3YKL+8h0DyA4aMmNfRsFJ65Z5GZQKBAA7T5BfNYlvGn9S9b78O1IqHJwDw=="#;
+
+        let store = MockStore::new();
+
+        let info = ValidPathInfo::parse_str(str, &store).unwrap();
+
+        assert_eq!(
+            info.path,
+            StorePath::new("m1a7l5663wfrp36myxwmk61yc546zkqf-libnfc-1.7.1").unwrap()
+        );
+        assert_eq!(info.nar_size, Some(582352));
+        assert_eq!(info.binary_info.unwrap().file_size, Some(121344));
+        // TODO: check more fields
+    }
+}

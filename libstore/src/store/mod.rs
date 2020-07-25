@@ -100,8 +100,10 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
         &'a self,
         path: &'a path::StorePaths,
         plugin_reg: &'a crate::plugin::PluginRegistry,
-    ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
-        LocalFutureObj::new(Box::new(async move { Ok(None) }))
+    ) -> LocalFutureObj<'a, Result<path::SubstitutablePathInfos, StoreError>> {
+        LocalFutureObj::new(Box::new(
+            async move { Ok(path::SubstitutablePathInfos::new()) },
+        ))
     }
 
     fn ensure_path<'a>(
@@ -292,6 +294,10 @@ pub trait Store {
     fn get_store_dir<'a>(&'a self) -> Result<String, StoreError>;
 
     fn get_state_dir<'a>(&'a self) -> Result<String, StoreError>;
+
+    fn get_uri<'a>(&'a self) -> String {
+        self.get_store_dir().unwrap()
+    }
 
     fn parse_store_path<'a>(&'a self, path: &'a str) -> Result<StorePath, StoreError> {
         // TODO: canon path
