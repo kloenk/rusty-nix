@@ -41,6 +41,8 @@ custom_error! {
 
         Reqwest{source: reqwest::Error} = "Reqwest: {source}",
 
+        Build{source: BuildError} = "Build: {source}",
+
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
 
@@ -73,6 +75,8 @@ custom_error! {
         UserNotExisting{ user: String } = "the user '{user}' does not exist",
         UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
         SysError{ msg: String } = "SysError {msg}",
+        RequireFeature { platform: String, features: Vec<String>, path: String} = @{ format!("a '{}' with features {{{}}} is required to build '{}', but I am a '{}' with features {{{}}}", platform, features.join(" "), path, libutil::config::default_system(), libutil::config::default_system_features().join(" "))}
+        //RequireFeature{ platform: String, features: String, path: String, is_platform: String, is_features: String } = "a '{platform}' with features {{{features}}} is required to build '{path}', but I am a '{is_platform}' with features {{{is_features}}}",
 }
 
 custom_error! {

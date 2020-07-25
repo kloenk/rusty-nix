@@ -155,9 +155,30 @@ impl BuildStore for Arc<LocalStore> {
         LocalFutureObj::new(Box::new(async move {
             info!("building pathes: {:?}", drvs);
 
-            let worker = crate::build::worker::Worker::new();
+            let worker = crate::build::worker::Worker::new(self.box_clone_build());
 
             self.prime_cache(&drvs, plugin_reg).await?;
+
+            let mut goals: Vec<Arc<dyn crate::build::goal::Goal>> = Vec::new();
+
+            for path in drvs {
+                if path.path.is_derivation() {
+                    let goal = worker
+                        .make_derivation_goal(
+                            path.path,
+                            path.outputs,
+                            crate::build::worker::BuildMode::None,
+                        )
+                        .await?;
+                    goals.push(goal);
+                //warn!("makeDRVGoal: {}", path.path);
+                } else {
+                    warn!("make substitutionGoal: {}", path.path);
+                }
+            }
+
+            warn!("goals: {:?}", goals);
+            worker.run(goals).await?;
 
             warn!("unimplemented build_paths");
             //unimplemented!(); // TODO: implement things
@@ -176,94 +197,8 @@ impl BuildStore for Arc<LocalStore> {
             use std::sync::{Arc, Mutex};
             let state = Arc::new(Mutex::new(super::MissingInfo::new()));
 
-            /*let do_path = |path: &'a StorePathWithOutputs,
-                           state: Arc<Mutex<super::MissingInfo>>,
-                           store: Arc<LocalStore>,
-                           substitute: bool| async move {
-                let mut state_l = state.lock().unwrap();
-                if state_l.done.contains(&path.path.name()) {
-                    return Ok(());
-                }
-                state_l.done.push(path.path.name());
-                drop(state_l);
-
-                println!("working on {}", path.path.name());
-
-                if path.path.is_derivation() {
-                    if !store.is_valid_path(&path.path).await? {
-                        //insert into unknown
-                        // TODO: we could try to substitute the drv
-                        let mut state_l = state.lock().unwrap();
-                        state_l.unknown.push(path.path.clone());
-                        return Ok(());
-                    }
-                    let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
-                    let drv =
-                        crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
-
-                    // TODO:
-                    /*
-                    PathSet invalid;
-                    for (auto & j : drv->outputs)
-                        if (wantOutput(j.first, path.outputs)
-                            && !isValidPath(j.second.path))
-                            invalid.insert(printStorePath(j.second.path));
-                    if (invalid.empty()) return;*/
-                    let mut invalid = crate::store::path::StorePaths::new();
-                    for (name, out) in &drv.derivation.outputs {
-                        if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
-                            trace!("adding {} to doto list", self.print_store_path(&out.path));
-                            invalid.push(out.path.clone());
-                        }
-                    }
-                    if invalid.is_empty() {
-                        return Ok(());
-                    }
-
-                    if substitute && drv.substitutes_allowed() {
-                        for v in invalid {
-                            debug!("check for subst: {}", v);
-                            //do_path(v, state.clone(), store.clone(), substitute).await?;
-                            unimplemented!("qeue path");
-                            // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
-                        }
-                    } else {
-                        unimplemented!("no substitute enabled");
-                    }
-                } else {
-                    warn!("non derivation path: {}", self.print_store_path(&path.path));
-                    /*
-                    if (isValidPath(path.path)) return;
-
-                    SubstitutablePathInfos infos;
-                    querySubstitutablePathInfos({path.path}, infos);
-
-                    if (infos.empty()) {
-                        auto state(state_.lock());
-                        state->unknown.insert(path.path);
-                        return;
-                    }
-
-                    auto info = infos.find(path.path);
-                    assert(info != infos.end());
-
-                    {
-                        auto state(state_.lock());
-                        state->willSubstitute.insert(path.path);
-                        state->downloadSize += info->second.downloadSize;
-                        state->narSize += info->second.narSize;
-                    }
-
-                    for (auto & ref : info->second.references)
-                        pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
-                        */
-                }
-
-                /*return Err(StoreError::Unimplemented {
-                    msg: "unimplemented".to_string(),
-                });*/
-                Ok(())
-            };*/
+            let substitute = crate::CONFIG.read().unwrap();
+            let substitute = substitute.substitute;
 
             let mut work = Vec::new();
             for v in paths {
@@ -271,10 +206,9 @@ impl BuildStore for Arc<LocalStore> {
                     v.clone(),
                     state.clone(),
                     self.clone(),
-                    true,
+                    substitute,
                     plugin_reg.clone(),
-                )); // TODO: read substitute from settings
-                    // TODO: substitute from settings
+                ));
             }
 
             let ret: Result<Vec<()>, StoreError> =
@@ -964,9 +898,6 @@ fn do_path<'a>(
             }
         }
 
-        /*return Err(StoreError::Unimplemented {
-            msg: "unimplemented".to_string(),
-        });*/
         Ok(())
     }))
 }
