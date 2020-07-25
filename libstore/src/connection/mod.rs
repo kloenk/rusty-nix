@@ -66,7 +66,7 @@ pub struct Connection {
     u_name: String,
 
     store: Box<dyn crate::store::BuildStore>,
-    plugins: crate::plugin::PluginRegistry,
+    plugins: Arc<crate::plugin::PluginRegistry>,
 }
 
 impl Connection {
@@ -79,6 +79,7 @@ impl Connection {
         u_name: String,
     ) -> Result<Self, StoreError> {
         let plugins = crate::plugin::PluginRegistry::new()?;
+        let plugins = Arc::new(plugins);
         let store = plugins
             .open_store_build(store, std::collections::HashMap::new())
             .await?;
@@ -407,7 +408,9 @@ impl Connection {
 
         self.con.start_work().await?;
         warn!("build pathes");
-        self.store.build_paths(drvs, mode as u8).await?;
+        self.store
+            .build_paths(drvs, mode as u8, self.plugins.clone())
+            .await?;
         self.con.stop_work(WORKDONE).await?;
 
         self.con.write_u64(1).await?;
@@ -422,7 +425,7 @@ impl Connection {
         let path = self.store.parse_store_path_with_outputs(&path)?;
 
         self.con.start_work().await?;
-        self.store.ensure_path(&path).await?; // TODO: implement
+        self.store.ensure_path(&path, self.plugins.clone()).await?; // TODO: implement
         self.con.stop_work(WORKDONE).await?;
 
         self.con.write_u64(1).await?;

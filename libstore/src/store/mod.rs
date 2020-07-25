@@ -60,19 +60,22 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
         &'a self,
         drvs: Vec<path::StorePathWithOutputs>,
         mode: u8,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>; // TODO: make mode an enum
 
     fn query_missing<'a>(
         &'a self,
         paths: &'a Vec<path::StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<MissingInfo, StoreError>>;
 
     fn prime_cache<'a>(
         &'a self,
         drvs: &'a Vec<path::StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            let missing = self.query_missing(drvs).await?;
+            let missing = self.query_missing(drvs, plugin_reg).await?;
 
             let conf = crate::CONFIG.read().unwrap();
             let max_build_jobs = conf.max_jobs.clone();
@@ -95,6 +98,7 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
     fn qurey_substitutable_path_infos<'a>(
         &'a self,
         path: &'a path::StorePaths,
+        plugin_reg: &'a crate::plugin::PluginRegistry,
     ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
         LocalFutureObj::new(Box::new(async move { Ok(None) }))
     }
@@ -102,6 +106,7 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
     fn ensure_path<'a>(
         &'a self,
         path: &'a path::StorePathWithOutputs,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn box_clone_build(&self) -> Box<dyn BuildStore>;
@@ -348,7 +353,7 @@ impl PartialEq for dyn Store {
 }
 
 // FIXME: move into Connection??
-pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, StoreError> {
+/*pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, StoreError> {
     let setting = crate::CONFIG.read().unwrap();
     let mut ret: Vec<Box<dyn ReadStore>> = Vec::new();
     use std::collections::HashMap;
@@ -366,7 +371,7 @@ pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, Store
     ret.sort_by(|a, b| a.partial_cmp(b).unwrap());
 
     Ok(ret)
-}
+}*/
 
 /*pub async fn open_store_read(
     store_uri: &str,
@@ -401,12 +406,13 @@ pub async fn open_store_build(
     v.display().to_string()
 }*/
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[repr(u8)]
 pub enum StoreCap {
-    None,
-    Read,
-    Write,
-    Build,
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Build = 3,
 }
 
 impl std::fmt::Display for StoreCap {

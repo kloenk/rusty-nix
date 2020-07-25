@@ -148,13 +148,14 @@ impl BuildStore for Arc<LocalStore> {
         &'a self,
         drvs: Vec<StorePathWithOutputs>,
         mode: u8,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             info!("building pathes: {:?}", drvs);
 
             let worker = crate::build::worker::Worker::new();
 
-            self.prime_cache(&drvs).await?;
+            self.prime_cache(&drvs, plugin_reg).await?;
 
             warn!("unimplemented build_paths");
             //unimplemented!(); // TODO: implement things
@@ -165,6 +166,7 @@ impl BuildStore for Arc<LocalStore> {
     fn query_missing<'a>(
         &'a self,
         paths: &'a Vec<StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<super::MissingInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             info!("quering info about missing paths");
@@ -263,8 +265,14 @@ impl BuildStore for Arc<LocalStore> {
 
             let mut work = Vec::new();
             for v in paths {
-                work.push(do_path(v.clone(), state.clone(), self.clone(), true));
-                // TODO: substitute from settings
+                work.push(do_path(
+                    v.clone(),
+                    state.clone(),
+                    self.clone(),
+                    true,
+                    plugin_reg.clone(),
+                )); // TODO: read substitute from settings
+                    // TODO: substitute from settings
             }
 
             let ret: Result<Vec<()>, StoreError> =
@@ -279,13 +287,14 @@ impl BuildStore for Arc<LocalStore> {
     fn ensure_path<'a>(
         &'a self,
         path: &'a StorePathWithOutputs,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             if self.is_valid_path(&path.path).await? {
                 return Ok(());
             }
 
-            self.prime_cache(&vec![path.clone()]).await?;
+            self.prime_cache(&vec![path.clone()], plugin_reg).await?;
 
             unimplemented!();
             Ok(())
@@ -295,6 +304,7 @@ impl BuildStore for Arc<LocalStore> {
     fn qurey_substitutable_path_infos<'a>(
         &'a self,
         path: &'a super::path::StorePaths,
+        plugin_reg: &'a crate::plugin::PluginRegistry,
     ) -> LocalFutureObj<'a, Result<Option<()>, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             let setting = crate::CONFIG.read().unwrap();
@@ -303,7 +313,10 @@ impl BuildStore for Arc<LocalStore> {
                 return Ok(None);
             }
 
-            for s in super::get_default_substituters().await? {
+            //let subs: Vec<Box<dyn ReadStore>> = Vec::new();
+            let subs = plugin_reg.open_default_substituters().await?;
+
+            for s in subs {
                 if s.get_store_dir()? != self.get_store_dir()? {
                     continue;
                 }
@@ -831,6 +844,7 @@ fn do_path<'a>(
     state: Arc<std::sync::Mutex<super::MissingInfo>>,
     store: Arc<LocalStore>,
     substitute: bool,
+    plugin_reg: Arc<crate::plugin::PluginRegistry>,
 ) -> LocalFutureObj<'a, Result<(), StoreError>> {
     LocalFutureObj::new(Box::new(async move {
         let mut state_l = state.lock().unwrap();
@@ -880,6 +894,7 @@ fn do_path<'a>(
                         state.clone(),
                         store.clone(),
                         substitute,
+                        plugin_reg.clone(),
                     )
                     .await?;
                     // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
@@ -891,6 +906,8 @@ fn do_path<'a>(
             if store.is_valid_path(&path.path).await? {
                 return Ok(());
             }
+
+            let foo = plugin_reg.open_default_substituters().await?;
             /*
             if (isValidPath(path.path)) return;
 
