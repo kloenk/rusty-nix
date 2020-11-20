@@ -14,11 +14,11 @@ color = [ "clap/color" ]
 custom_error = "1.7"
 clap = "2.33"
 log = "0.4"
-env_logger = "0.6"
-tokio = { version = "*", features = [ "full", "uds" ] }
+env_logger = "0.8"
+tokio = { version = "0.3", features = [ "full" ] }
 futures = "0.3"
 users = "0.10"
-libc = "*"
+libc = "0.2"
 
 libstore = { path = "../libstore" }
 libutil = { path = "../libutil" }
