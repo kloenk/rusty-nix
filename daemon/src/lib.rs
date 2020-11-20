@@ -171,11 +171,11 @@ impl NixDaemon {
         let creds = stream.peer_cred()?;
 
         //let user = users::get_user_by_uid(creds.uid);
-        let user = match users::get_user_by_uid(creds.uid) {
+        let user = match users::get_user_by_uid(creds.uid()) {
             Some(v) => v.name().to_string_lossy().to_string(),
             None => "not allowed user".to_string(),
         };
-        let group = match users::get_group_by_gid(creds.gid) {
+        let group = match users::get_group_by_gid(creds.gid()) {
             Some(v) => v.name().to_string_lossy().to_string(),
             None => "not allowed group".to_string(),
         };
@@ -190,10 +190,10 @@ impl NixDaemon {
         drop(config);
 
         info!(
-            "accepted connection from user {}{}",
+            "accepted connection from user {}{}{}",
             user,
             if trusted { " (trusted)" } else { "" },
-            //if let Some(pid) = creds.pid { format!(" pid: {}", pid) } else { "".to_string() }
+            if let Some(pid) = creds.pid() { format!(" pid: {}", pid) } else { "".to_string() }
         ); // TODO: pid
 
         // verify client version

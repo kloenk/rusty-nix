@@ -9,23 +9,23 @@ license = "GPL-3.0-or-later"
 
 [dependencies]
 custom_error = "1.7"
-tokio = { version = "0.2.21", features = [ "full" ] }
-log = "*"
-futures = "*"
+tokio = { version = "0.3", features = [ "full" ] }
+log = "0.4"
+futures = "0.3"
 byteorder = "1"
 chrono = "0.4"
-lru_time_cache = "*"
-rusqlite = "*"
-sha2 = "*"
-libc = "*"
-ring = { version = "*", features = [ "std", "dev_urandom_fallback" ] }
-lazy_static = "*"
-data-encoding = "*"
-nix = "*"
+lru_time_cache = "0.11"
+rusqlite = "0.24"
+sha2 = "0.9"
+libc = "0.2"
+ring = { version = "0.16", features = [ "std", "dev_urandom_fallback" ] }
+lazy_static = "1.4"
+data-encoding = "2.3"
+nix = "0.19"
 reqwest = { version = "*", features = [ "rustls-tls", "gzip", "brotli", "stream" ], default-features = false }
 
 libutil = { path = "../libutil" }
 
 
 [dev-dependencies]
-env_logger = "*"
+env_logger = "0.8"
