@@ -6,4 +6,6 @@ pub mod worker;
 
 pub mod derivation;
 
+pub mod goal;
+
 //pub mod goal;

@@ -2,14 +2,17 @@ use log::*;
 use std::collections::HashMap;
 
 use super::*;
+use crate::error::BuildError;
 use crate::store::path::{StorePath, StorePaths};
+use crate::store::{BuildStore, Store};
 
+// TODO: change to pub(crate)?
 pub struct DerivationGoal {
     /// Whether the goal is finished
     pub exit_code: ExitCode,
 
     /// Backlink to the worker
-    pub worker: Rc<Worker>,
+    pub worker: Arc<Worker>,
 
     /// Goals that this goal is waiting for.
     pub waitees: Goals,
@@ -53,8 +56,11 @@ pub struct DerivationGoal {
     /*/* The derivation stored at drvPath. */
     std::unique_ptr<BasicDerivation> drv;
 
-    std::unique_ptr<ParsedDerivation> parsedDrv;
+    */
+    //std::unique_ptr<ParsedDerivation> parsedDrv;
+    pub parsed_drv: Arc<crate::build::derivation::ParsedDerivation>,
 
+    /*
     /* The remainder is state held during the build. */
 
     /* Locks on the output paths. */
@@ -70,7 +76,8 @@ pub struct DerivationGoal {
     pub missing_paths: StorePaths,
 
     /// User selected for running the builder.
-    pub build_user: crate::build::user::UserLock,
+    // TODO: only set when starting?
+    pub build_user: Option<crate::build::user::UserLock>,
 
     /// The process ID of the builder.
     pub pid: libc::pid_t,
@@ -149,27 +156,21 @@ pub struct DerivationGoal {
     #[cfg(target_os = "darwin")]
     /// SandboxProfile used on darwin
     pub additional_sandbox_profile: String,
+
     /*
+    /* Hash rewriting. */
+    StringMap inputRewrites, outputRewrites;
+    typedef map<StorePath, StorePath> RedirectedOutputs;
+    RedirectedOutputs redirectedOutputs;*/
+    pub build_mode: super::super::worker::BuildMode,
 
-    #if __APPLE__
-        typedef string SandboxProfile;
-        SandboxProfile additionalSandboxProfile;
-    #endif
+    /*/* If we're repairing without a chroot, there may be outputs that
+       are valid but corrupt.  So we redirect these outputs to
+       temporary paths. */
+    StorePathSet redirectedBadOutputs;
 
-        /* Hash rewriting. */
-        StringMap inputRewrites, outputRewrites;
-        typedef map<StorePath, StorePath> RedirectedOutputs;
-        RedirectedOutputs redirectedOutputs;
-
-        BuildMode buildMode;
-
-        /* If we're repairing without a chroot, there may be outputs that
-           are valid but corrupt.  So we redirect these outputs to
-           temporary paths. */
-        StorePathSet redirectedBadOutputs;
-
-        BuildResult result;
-        */
+    BuildResult result;
+    */
     /// The current round, if we're building multiple times
     pub cur_round: usize,
 
@@ -186,8 +187,8 @@ pub struct DerivationGoal {
     pub sandbox_uid: libc::uid_t,
     pub sandbox_gid: libc::gid_t,
 
-    /// path to the home dir
-    pub home_dir: &'static str,
+    // path to the home dir
+    //pub home_dir: &'static str,
 
     /*
     std::unique_ptr<MaintainCount<uint64_t>> mcExpectedBuilds, mcRunningBuilds;
@@ -248,7 +249,7 @@ impl DerivationGoal {
 }
 
 impl Goal for DerivationGoal {
-    fn key(&self) -> String {
+    fn key(&self, store: &dyn Store) -> String {
         /* Ensure that derivations get built in order of their name,
          * i.e. a derivation named "aardvark" always comes before
          * "baboon". And substitution goals always happen before
@@ -257,27 +258,34 @@ impl Goal for DerivationGoal {
         format!(
             "b${}${}",
             self.drv_path.name(),
-            self.drv_path.print_store_path()
-        ) // TODO: first should only be the name
+            store.print_store_path(&self.drv_path),
+        )
     }
 
-    fn start_work(&mut self) -> Result<(), crate::error::BuildError> {
+    fn key_nostore(&self) -> String {
+        format!("b${}$/nix/store/{}", self.drv_path.name(), self.drv_path)
+    }
+
+    fn start_work(&self) -> Result<(), crate::error::BuildError> {
+        // check for right platform
+        if !self.parsed_drv.can_build_locally() {
+            return Err(BuildError::RequireFeature {
+                platform: self.parsed_drv.derivation.platform.to_string(),
+                features: self.parsed_drv.get_required_system_features(),
+                path: self.drv_path.to_string(),
+            });
+        }
+        if self.parsed_drv.derivation.is_builtin() {
+            unimplemented!("builting derivation");
+            //preloadNSS();
+        }
+
+        // TODO: apple foo
+        /*#if __APPLE__
+            additionalSandboxProfile = parsedDrv->getStringAttr("__sandboxProfile").value_or("");
+        #endif*/
         unimplemented!()
         /*     /* Right platform? */
-            if (!parsedDrv->canBuildLocally())
-                throw Error("a '%s' with features {%s} is required to build '%s', but I am a '%s' with features {%s}",
-                    drv->platform,
-                    concatStringsSep(", ", parsedDrv->getRequiredSystemFeatures()),
-                    worker.store.printStorePath(drvPath),
-                    settings.thisSystem,
-                    concatStringsSep<StringSet>(", ", settings.systemFeatures));
-
-            if (drv->isBuiltin())
-                preloadNSS();
-
-        #if __APPLE__
-            additionalSandboxProfile = parsedDrv->getStringAttr("__sandboxProfile").value_or("");
-        #endif
 
             /* Are we doing a chroot build? */
             {

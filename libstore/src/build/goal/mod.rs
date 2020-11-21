@@ -1,7 +1,9 @@
 use log::*;
-use std::rc::{Rc, Weak};
+//use std::rc::{Rc, Weak};
+use std::sync::{Arc, Weak};
 
 use super::worker::Worker;
+use crate::store::Store;
 
 pub mod derivation;
 
@@ -23,13 +25,38 @@ pub enum Error {
     Interrupted,
 }
 
-pub type Goals = Vec<Rc<dyn Goal>>; // TODO: C++ uses set<Goal, `CompareGoalPtrs`>
+pub type Goals = Vec<Arc<dyn Goal>>; // TODO: C++ uses set<Goal, `CompareGoalPtrs`>
 pub type WeakGoals = Vec<Weak<dyn Goal>>;
 
 pub trait Goal {
-    fn key(&self) -> String;
+    ///  Ensure that derivations get built in order of their name,
+    ///  i.e. a derivation named "aardvark" always comes before
+    ///  "baboon". And substitution goals always happen before
+    ///  derivation goals (due to "b$").
+    fn key(&self, store: &dyn Store) -> String;
 
-    fn start_work(&mut self) -> Result<(), crate::error::BuildError>; // TODO: async?
+    fn key_nostore(&self) -> String;
+
+    fn start_work(&self) -> Result<(), crate::error::BuildError>; // TODO: async?
+}
+
+use std::fmt;
+impl fmt::Debug for dyn Goal {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Goal {{ {} }}", self.key_nostore())
+    }
+}
+
+impl PartialEq for dyn Goal {
+    fn eq(&self, other: &dyn Goal) -> bool {
+        self.key_nostore() == other.key_nostore()
+    }
+}
+
+impl PartialOrd for dyn Goal {
+    fn partial_cmp(&self, other: &dyn Goal) -> Option<std::cmp::Ordering> {
+        self.key_nostore().partial_cmp(&other.key_nostore())
+    }
 }
 
 /*pub struct Goal {

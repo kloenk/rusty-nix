@@ -26,12 +26,12 @@ pub struct MockStore {
 }
 
 impl MockStore {
-    pub fn new() -> Self {
-        Self {
+    pub fn new() -> Arc<Self> {
+        Arc::new(Self {
             files: Arc::new(Mutex::new(HashMap::new())),
             symlinks: Arc::new(Mutex::new(HashMap::new())),
             dirs: Arc::new(Mutex::new(Vec::new())),
-        }
+        })
     }
 
     pub fn file_exists(&self, path: &str) -> bool {

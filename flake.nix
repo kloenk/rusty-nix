@@ -29,30 +29,98 @@
     in {
       overlay = final: prev: {
         rusty-nix = with final;
-          with commondDeps pkgs;
-          (rustPlatform.buildRustPackage {
-            pname = "rusty-nix";
-            inherit version;
+          let
+            lockFile = builtins.fromTOML (builtins.readFile
+              ./Cargo.lock); # (builtins.readFile self + "./Cargo.lock");
 
-            src = self;
+            files = map (pkg:
+              fetchurl {
+                name = pkg.name;
+                url =
+                  "https://crates.io/api/v1/crates/${pkg.name}/${pkg.version}/download";
+                sha256 = pkg.checksum;
+              }) (builtins.filter (pkg:
+                pkg.source or ""
+                == "registry+https://github.com/rust-lang/crates.io-index")
+                lockFile.package);
+            vendorCrates = runCommand "cargo-vendor-dir" { } ''
+              mkdir -p $out/vendor
 
-            #outputs = [ "out" "doc" ]; # TODO: dev/doc?
+              cat > $out/vendor/config << EOF
+              [source.crates-io]
+              replace-with = "vendored-sources"
 
-            buildInputs = buildDeps;
+              [source.vendored-sources]
+              directory = "vendor"
+              EOF
+              ${toString (builtins.map (file: ''
+                mkdir $out/vendor/tmp
+                tar xvf ${file} -C $out/vendor/tmp
+                dir=$(echo $out/vendor/tmp/*)
 
-            propagatedBuildInputs = propBuildDeps;
+                printf '{"files":{},"package":"${file.outputHash}"}' > "$dir/.cargo-checksum.json"
 
-            cargoSha256 =
-              "sha256-kCuSUPQpjj2YpxLp1s0eUvSOEXGrizg+xWWKHkst1Ys=";
+                if [[ $dir =~ /winapi ]]; then
+                  find $dir -name "*.a" -print0 | xargs -0 rm -f --
+                fi
 
-#            postInstall = ''
-#              cargo doc --workspace --release --all-features --frozen --offline --target-dir $doc
-#
-#              mkdir -p $doc/nix-support/
-#              echo "doc manual $doc/" >> $doc/nix-support/hydra-build-products
-#            '';
+                mv "$dir" $out/vendor/
 
-          });
+                rm -rf $out/vendor/tmp
+              '') files)}
+            '';
+          in stdenv.mkDerivation {
+            name = "rusty-nix";
+
+            nativeBuildInputs = [ cargo rustc ];
+
+            buildInputs = [ sqlite ];
+
+            #propagatedBuildInputs = [
+
+            #];
+
+            buildPhase = ''
+              ln -sfn ${vendorCrates}/vendor/ vendor
+              export CARGO_HOME=$(pwd)/vendor
+              cargo build --release --offline
+            '';
+
+            installPhase = ''
+              install -D -m755 ./target/release/backend $out/bin/backend
+            '';
+
+            doCheck = true;
+            checkPhase = ''
+              cargo test --release
+            '';
+          };
+        /* rusty-nix = with final;
+                     with commondDeps pkgs;
+                     (rustPlatform.buildRustPackage {
+                       pname = "rusty-nix";
+                       inherit version;
+
+                       src = self;
+
+                       #outputs = [ "out" "doc" ]; # TODO: dev/doc?
+
+                       buildInputs = buildDeps;
+
+                       propagatedBuildInputs = propBuildDeps;
+
+                       cargoSha256 =
+                         "sha256-nPT3yNS5Lfn6GwI8Zjatik8qxXFoD80kZGGHYrnx99Q=";
+
+           #            postInstall = ''
+           #              cargo doc --workspace --release --all-features --frozen --offline --target-dir $doc
+           #
+           #              mkdir -p $doc/nix-support/
+           #              echo "doc manual $doc/" >> $doc/nix-support/hydra-build-products
+           #            '';
+
+                     });
+        */
       };
 
       hydraJobs = {

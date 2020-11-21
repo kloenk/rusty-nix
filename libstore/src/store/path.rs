@@ -132,6 +132,30 @@ impl PartialEq<StorePath> for StorePathWithOutputs {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SubstitutablePathInfo {
+    pub deriver: Option<StorePath>,
+    pub references: StorePaths,
+
+    /// None if Unkown or inapplicable
+    pub donwload_size: Option<u64>,
+    /// None if Unkown
+    pub nar_size: Option<u64>,
+}
+
+impl std::convert::From<super::ValidPathInfo> for SubstitutablePathInfo {
+    fn from(v: super::ValidPathInfo) -> Self {
+        Self {
+            deriver: v.deriver,
+            donwload_size: v.binary_info.map(|v| v.file_size).flatten(),
+            references: v.references,
+            nar_size: v.nar_size,
+        }
+    }
+}
+
+pub type SubstitutablePathInfos = Vec<SubstitutablePathInfo>;
+
 #[cfg(test)]
 mod test {
     use std::sync::Arc;

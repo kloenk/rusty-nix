@@ -1,4 +1,22 @@
+use crate::error::BuildError;
+use crate::store::BuildStore;
+
+use std::boxed::Box;
+use std::sync::{Arc, Mutex, Weak};
+
+use super::goal::Goal;
+
+use crate::store::path::StorePath;
+
 pub struct Worker {
+    store: Box<dyn BuildStore>,
+
+    /// the top-level goals of the worker.
+    top_goals: Mutex<Vec<Arc<dyn super::goal::Goal>>>,
+
+    /// Goals that are ready to do some work.
+    awake: Mutex<Vec<Weak<dyn super::goal::Goal>>>,
+
     /*/* Note: the worker should only have strong pointers to the
        top-level goals. */
 
@@ -144,14 +162,138 @@ pub struct Worker {
 }
 
 impl Worker {
-    pub fn new() -> Self {
-        Self {
+    pub fn new(store: Box<dyn BuildStore>) -> Arc<Self> {
+        Arc::new(Self {
+            store,
             last_woken_up: std::time::SystemTime::now(),
             nr_local_builds: 0,
-        }
+            awake: Mutex::new(Vec::new()),
+            top_goals: Mutex::new(Vec::new()),
+        })
     }
 
-    pub fn get_nr_local_builds(&self) -> usize {
+    pub fn get_nr_local_builds(self: &Arc<Self>) -> usize {
         self.nr_local_builds
     }
+
+    pub async fn run(
+        self: &Arc<Self>,
+        goals: Vec<Arc<dyn super::goal::Goal>>,
+    ) -> Result<(), BuildError> {
+        let mut goals = goals;
+        goals.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+        let mut top_goals = self.top_goals.lock().unwrap();
+        *top_goals = goals;
+        drop(top_goals); // others need acces
+
+        log::debug!("entered goal loop");
+
+        loop {
+            let mut do_inner = self.do_inner();
+
+            while do_inner {
+                let mut awake2 = Vec::new();
+                let mut awake = self.awake.lock().unwrap();
+                for g in awake.drain(..) {
+                    awake2.push(g)
+                }
+                drop(awake);
+
+                for g in awake2.drain(..) {
+                    if let Some(Err(e)) = g.upgrade().map(|v| v.start_work()) {
+                        return Err(e);
+                    }
+                    if self.top_goals.lock().unwrap().is_empty() {
+                        break;
+                    };
+                }
+
+                do_inner = self.do_inner();
+            }
+
+            //self.store.auto_gc(false)?;
+        }
+        unimplemented!()
+    }
+
+    fn do_inner(self: &Arc<Self>) -> bool {
+        let awake = self.awake.lock().unwrap().is_empty();
+        let top_goals = self.top_goals.lock().unwrap().is_empty();
+        !awake && !top_goals
+    }
+
+    pub async fn make_derivation_goal(
+        self: &Arc<Self>,
+        drv_path: StorePath,
+        wanted_outputs: Vec<String>,
+        build_mode: BuildMode,
+    ) -> Result<Arc<dyn Goal>, BuildError> {
+        let store = self.store.box_clone();
+        let parsed_drv = crate::build::derivation::Derivation::from_path(&drv_path, &(*store))
+            .await
+            .unwrap();
+        let parsed_drv =
+            crate::build::derivation::ParsedDerivation::new(drv_path.clone(), parsed_drv).unwrap();
+        let parsed_drv = Arc::new(parsed_drv);
+
+        let settings = crate::CONFIG.read().unwrap();
+
+        let ret = super::goal::derivation::DerivationGoal {
+            build_mode,
+            wanted_outputs,
+            drv_path,
+            parsed_drv,
+            build_user: None,
+            use_derivation: false,
+            chroot_root_dir: std::path::PathBuf::new(),
+            cur_round: 0,
+            current_hook_line: String::new(),
+            current_log_line: String::new(),
+            current_log_line_pos: 0,
+            env: std::collections::HashMap::new(), // TODO
+            ex: None,
+            exit_code: super::goal::ExitCode::EcBusy,
+            fixed_output: false,
+            log_size: 0,
+            log_tail: Vec::new(),
+            machine_name: String::new(),
+            missing_paths: Vec::new(),
+            name: String::new(), // TODO?
+            needs_restart: false,
+            nr_failed: 0,
+            nr_incomplete_closure: 0,
+            nr_no_substituters: 0,
+            nr_rounds: 0,
+            pid: 0,
+            private_network: true,
+            retry_substitution: false,
+            sandbox_gid: 0,
+            sandbox_uid: 0,
+            tmp_dir: std::path::PathBuf::new(),
+            tmp_dir_in_sandbox: std::path::PathBuf::from(&settings.sandbox_build_dir),
+            use_chroot: false, // TODO: settings,
+            valid_paths: Vec::new(),
+            waitees: Vec::new(),
+            waiters: Vec::new(),
+            worker: self.clone(),
+        };
+
+        let ret = Arc::new(ret) as Arc<dyn Goal>;
+
+        self.wake_up(Arc::downgrade(&ret))?;
+
+        Ok(ret)
+    }
+
+    fn wake_up(self: &Arc<Self>, goal: Weak<dyn Goal>) -> Result<(), BuildError> {
+        let mut awake = self.awake.lock().unwrap();
+        (*awake).push(goal);
+        Ok(())
+    }
+}
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BuildMode {
+    None,
 }

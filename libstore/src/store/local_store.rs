@@ -6,12 +6,52 @@ use log::*;
 // for async trait
 use futures::future::LocalFutureObj;
 use std::boxed::Box;
-use std::convert::TryFrom;
 
 use super::path::StorePathWithOutputs;
 use super::{BuildStore, ReadStore, Store, StorePath, WriteStore};
 
 use std::sync::{Arc, RwLock};
+
+#[derive(Debug)]
+pub struct LocalStoreOpener {}
+
+impl LocalStoreOpener {
+    pub fn new() -> Box<Self> {
+        Box::new(Self {})
+    }
+}
+
+impl crate::plugin::StoreOpener for LocalStoreOpener {
+    fn open_reader<'a>(
+        &'a self,
+        kind: &'a str,
+        uri: &'a str,
+        params: std::collections::HashMap<String, crate::store::Param>,
+    ) -> LocalFutureObj<'a, Result<Box<dyn crate::store::ReadStore>, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let store = self.open_builder(kind, uri, params).await?;
+            Ok(store.box_clone_read())
+            //return Ok(self.open_builder(uri, params).await? as Box<dyn ReadStore>);
+        }))
+    }
+
+    fn open_builder<'a>(
+        &'a self,
+        _kind: &'a str,
+        uri: &'a str,
+        params: std::collections::HashMap<String, crate::store::Param>,
+    ) -> LocalFutureObj<'a, Result<Box<dyn BuildStore>, StoreError>> {
+        log::info!("opening local store: {}", uri);
+        LocalFutureObj::new(Box::new(async move {
+            let uri = match uri {
+                "auto" => "/nix/",
+                _ => uri,
+            };
+            let store = LocalStore::open_store(uri, params).await?;
+            return Ok(Box::new(store) as Box<dyn BuildStore>);
+        }))
+    }
+}
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
@@ -28,8 +68,7 @@ impl LocalStore {
         params: std::collections::HashMap<String, super::Param>,
     ) -> Result<Arc<Self>, crate::error::StoreError> {
         // TODO: access checks?
-        trace!("opening local store {}", path);
-        trace!("got params: {:?}", params);
+        trace!("got params for LocalStore: {:?}", params);
         std::fs::create_dir_all(path)?;
 
         let sqlite = Arc::new(RwLock::new(rusqlite::Connection::open(&format!(
@@ -111,13 +150,35 @@ impl BuildStore for Arc<LocalStore> {
         &'a self,
         drvs: Vec<StorePathWithOutputs>,
         mode: u8,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             info!("building pathes: {:?}", drvs);
 
-            let worker = crate::build::worker::Worker::new();
+            let worker = crate::build::worker::Worker::new(self.box_clone_build());
 
-            self.prime_cache(&drvs).await?;
+            self.prime_cache(&drvs, plugin_reg).await?;
+
+            let mut goals: Vec<Arc<dyn crate::build::goal::Goal>> = Vec::new();
+
+            for path in drvs {
+                if path.path.is_derivation() {
+                    let goal = worker
+                        .make_derivation_goal(
+                            path.path,
+                            path.outputs,
+                            crate::build::worker::BuildMode::None,
+                        )
+                        .await?;
+                    goals.push(goal);
+                //warn!("makeDRVGoal: {}", path.path);
+                } else {
+                    warn!("make substitutionGoal: {}", path.path);
+                }
+            }
+
+            warn!("goals: {:?}", goals);
+            worker.run(goals).await?;
 
             warn!("unimplemented build_paths");
             //unimplemented!(); // TODO: implement things
@@ -128,6 +189,7 @@ impl BuildStore for Arc<LocalStore> {
     fn query_missing<'a>(
         &'a self,
         paths: &'a Vec<StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<super::MissingInfo, StoreError>> {
         LocalFutureObj::new(Box::new(async move {
             info!("quering info about missing paths");
@@ -135,99 +197,18 @@ impl BuildStore for Arc<LocalStore> {
             use std::sync::{Arc, Mutex};
             let state = Arc::new(Mutex::new(super::MissingInfo::new()));
 
-            /*let do_path = |path: &'a StorePathWithOutputs,
-                           state: Arc<Mutex<super::MissingInfo>>,
-                           store: Arc<LocalStore>,
-                           substitute: bool| async move {
-                let mut state_l = state.lock().unwrap();
-                if state_l.done.contains(&path.path.name()) {
-                    return Ok(());
-                }
-                state_l.done.push(path.path.name());
-                drop(state_l);
-
-                println!("working on {}", path.path.name());
-
-                if path.path.is_derivation() {
-                    if !store.is_valid_path(&path.path).await? {
-                        //insert into unknown
-                        // TODO: we could try to substitute the drv
-                        let mut state_l = state.lock().unwrap();
-                        state_l.unknown.push(path.path.clone());
-                        return Ok(());
-                    }
-                    let drv = crate::build::derivation::Derivation::from_path(&path.path).await?;
-                    let drv =
-                        crate::build::derivation::ParsedDerivation::new(path.path.clone(), drv)?;
-
-                    // TODO:
-                    /*
-                    PathSet invalid;
-                    for (auto & j : drv->outputs)
-                        if (wantOutput(j.first, path.outputs)
-                            && !isValidPath(j.second.path))
-                            invalid.insert(printStorePath(j.second.path));
-                    if (invalid.empty()) return;*/
-                    let mut invalid = crate::store::path::StorePaths::new();
-                    for (name, out) in &drv.derivation.outputs {
-                        if path.outputs.contains(name) && !store.is_valid_path(&out.path).await? {
-                            trace!("adding {} to doto list", self.print_store_path(&out.path));
-                            invalid.push(out.path.clone());
-                        }
-                    }
-                    if invalid.is_empty() {
-                        return Ok(());
-                    }
-
-                    if substitute && drv.substitutes_allowed() {
-                        for v in invalid {
-                            debug!("check for subst: {}", v);
-                            //do_path(v, state.clone(), store.clone(), substitute).await?;
-                            unimplemented!("qeue path");
-                            // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
-                        }
-                    } else {
-                        unimplemented!("no substitute enabled");
-                    }
-                } else {
-                    warn!("non derivation path: {}", self.print_store_path(&path.path));
-                    /*
-                    if (isValidPath(path.path)) return;
-
-                    SubstitutablePathInfos infos;
-                    querySubstitutablePathInfos({path.path}, infos);
-
-                    if (infos.empty()) {
-                        auto state(state_.lock());
-                        state->unknown.insert(path.path);
-                        return;
-                    }
-
-                    auto info = infos.find(path.path);
-                    assert(info != infos.end());
-
-                    {
-                        auto state(state_.lock());
-                        state->willSubstitute.insert(path.path);
-                        state->downloadSize += info->second.downloadSize;
-                        state->narSize += info->second.narSize;
-                    }
-
-                    for (auto & ref : info->second.references)
-                        pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
-                        */
-                }
-
-                /*return Err(StoreError::Unimplemented {
-                    msg: "unimplemented".to_string(),
-                });*/
-                Ok(())
-            };*/
+            let substitute = crate::CONFIG.read().unwrap();
+            let substitute = substitute.substitute;
 
             let mut work = Vec::new();
             for v in paths {
-                work.push(do_path(v.clone(), state.clone(), self.clone(), true));
-                // TODO: substitute from settings
+                work.push(do_path(
+                    v.clone(),
+                    state.clone(),
+                    self.clone(),
+                    substitute,
+                    plugin_reg.clone(),
+                ));
             }
 
             let ret: Result<Vec<()>, StoreError> =
@@ -236,6 +217,69 @@ impl BuildStore for Arc<LocalStore> {
 
             let state: super::MissingInfo = Arc::try_unwrap(state).unwrap().into_inner().unwrap();
             Ok(state)
+        }))
+    }
+
+    fn ensure_path<'a>(
+        &'a self,
+        path: &'a StorePathWithOutputs,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            if self.is_valid_path(&path.path).await? {
+                return Ok(());
+            }
+
+            self.prime_cache(&vec![path.clone()], plugin_reg).await?;
+
+            unimplemented!();
+            Ok(())
+        }))
+    }
+
+    fn qurey_substitutable_path_infos<'a>(
+        &'a self,
+        path: &'a super::path::StorePaths,
+        plugin_reg: &'a crate::plugin::PluginRegistry,
+    ) -> LocalFutureObj<'a, Result<super::path::SubstitutablePathInfos, StoreError>> {
+        LocalFutureObj::new(Box::new(async move {
+            let setting = crate::CONFIG.read().unwrap();
+            let setting = setting.substitute;
+            if !setting {
+                return Ok(Vec::new());
+            }
+
+            //let subs: Vec<Box<dyn ReadStore>> = Vec::new();
+            let mut infos = super::path::SubstitutablePathInfos::new();
+            let mut done = super::path::StorePaths::new();
+            let subs = plugin_reg.open_default_substituters().await?;
+            let do_sub = crate::CONFIG.read().unwrap();
+            let do_sub = do_sub.substitute;
+
+            for s in subs {
+                if s.get_store_dir()? != self.get_store_dir()? {
+                    continue;
+                }
+                for path in path {
+                    if done.contains(path) {
+                        continue;
+                    }
+                    debug!(
+                        "checking substituter '{}' for path '{}'",
+                        s.get_uri(),
+                        s.print_store_path(path)
+                    );
+                    let info = s.query_path_info(path).await;
+                    if do_sub && info.is_err() {
+                        continue;
+                    } else if info.is_err() {
+                        return Err(info.unwrap_err());
+                    }
+                    infos.push(info.unwrap().into());
+                    done.push(path.clone());
+                }
+            }
+            Ok(infos)
         }))
     }
 
@@ -279,7 +323,17 @@ impl WriteStore for Arc<LocalStore> {
         target: &'a str,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            unimplemented!();
+            // tokio::fs::os::unix::symlink(source, target).await?;
+            // std::os::unix::fs::symlink(source, target)?;
+            // both above are failing if symlink is dangling at creation. so fallback to libc
+            let source = std::ffi::CString::new(source).unwrap();
+            let target = std::ffi::CString::new(target).unwrap();
+            if unsafe { libc::symlink(target.as_ptr(), source.as_ptr()) } != 0 {
+                return Err(StoreError::Io {
+                    source: std::io::Error::last_os_error(),
+                });
+            }
+            Ok(())
         }))
     }
 
@@ -619,6 +673,7 @@ impl ReadStore for Arc<LocalStore> {
                     ultimate,
                     sigs,
                     ca,
+                    binary_info: None,
                 }) // TODO: return valid Path Info
             })?;
 
@@ -694,6 +749,9 @@ impl ReadStore for Arc<LocalStore> {
                 });
             }*/
             let path = self.print_store_path(path);
+            if !std::path::Path::new(&path).exists() {
+                return Ok(false);
+            }
             let sqlite = self.sqlite.write().unwrap();
             let mut stm = sqlite.prepare("SELECT id FROM ValidPaths WHERE path = (?);")?;
 
@@ -718,6 +776,14 @@ impl Store for Arc<LocalStore> {
         Ok(format!("{}store", self.base_dir))
     }
 
+    fn priority<'a>(&'a self) -> u64 {
+        0
+    }
+
+    fn capability<'a>(&'a self) -> super::StoreCap {
+        super::StoreCap::Build
+    }
+
     fn box_clone(&self) -> Box<dyn Store> {
         Box::new(self.clone())
     }
@@ -737,6 +803,7 @@ fn do_path<'a>(
     state: Arc<std::sync::Mutex<super::MissingInfo>>,
     store: Arc<LocalStore>,
     substitute: bool,
+    plugin_reg: Arc<crate::plugin::PluginRegistry>,
 ) -> LocalFutureObj<'a, Result<(), StoreError>> {
     LocalFutureObj::new(Box::new(async move {
         let mut state_l = state.lock().unwrap();
@@ -786,49 +853,51 @@ fn do_path<'a>(
                         state.clone(),
                         store.clone(),
                         substitute,
+                        plugin_reg.clone(),
                     )
                     .await?;
-                    unimplemented!("qeue path");
                     // https://source.kloenk.de/github.com/NixOS/nix@9223603908abaa62711296aa224e1bc3d7fb0a91/-/blob/src/libstore/misc.cc?utm_source=share#L151
                 }
             } else {
                 unimplemented!("no substitute enabled");
             }
         } else {
-            warn!(
-                "non derivation path: {}",
-                store.print_store_path(&path.path)
-            );
-            /*
-            if (isValidPath(path.path)) return;
-
-            SubstitutablePathInfos infos;
-            querySubstitutablePathInfos({path.path}, infos);
-
-            if (infos.empty()) {
-                auto state(state_.lock());
-                state->unknown.insert(path.path);
-                return;
+            if store.is_valid_path(&path.path).await? {
+                return Ok(());
             }
 
-            auto info = infos.find(path.path);
-            assert(info != infos.end());
+            let infos = store
+                .qurey_substitutable_path_infos(&vec![path.path.clone()], &plugin_reg)
+                .await?;
 
-            {
-                auto state(state_.lock());
-                state->willSubstitute.insert(path.path);
-                state->downloadSize += info->second.downloadSize;
-                state->narSize += info->second.narSize;
+            if infos.len() == 0 {
+                let mut state_l = state.lock().unwrap();
+                state_l.unknown.push(path.path);
+                return Ok(());
             }
 
-            for (auto & ref : info->second.references)
-                pool.enqueue(std::bind(doPath, StorePathWithOutputs { ref }));
-                */
+            assert_eq!(infos.len(), 1);
+
+            let infos: super::path::SubstitutablePathInfo = infos[0].clone();
+
+            let mut state_l = state.lock().unwrap();
+            state_l.will_substitute.push(path.path.clone());
+            state_l.download_size += infos.donwload_size.unwrap_or(0);
+            state_l.nar_size += infos.nar_size.unwrap_or(0);
+            drop(state_l);
+
+            for v in infos.references {
+                do_path(
+                    path.clone(),
+                    state.clone(),
+                    store.clone(),
+                    substitute,
+                    plugin_reg.clone(),
+                )
+                .await?;
+            }
         }
 
-        /*return Err(StoreError::Unimplemented {
-            msg: "unimplemented".to_string(),
-        });*/
         Ok(())
     }))
 }

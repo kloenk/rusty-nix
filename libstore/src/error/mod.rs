@@ -14,7 +14,9 @@ custom_error! {
         Io{source: io::Error} = "IoError: {source}",
         StringToLong{len: usize} = "string is to long",
         ConnectionError{source: ConnectionError} = "ConnectionError: {source}",
+        PluginError{source: PluginError } = "PluginError: {source}",
         InvalidStoreUri{uri: String} = "InvalidStoreUri: {uri}",
+        NoStore{name: String} = "The Store {name} does not exists",
         NotInStore{path: String} = "path \"{path}\" is not in the Nix store",
         UtilError{source: libutil::error::UtilError} = "UtilError: {source}",
         SqlError{source: rusqlite::Error} = "SQLError: {source}",
@@ -35,6 +37,11 @@ custom_error! {
         InvalidDerivation{ msg: String } = "InvalidDerivation: {msg}",
         //BadArchive{ source: NarError } = "BadArchive: {source}",
         BadBase32 = "Bad base 32 structure",
+        MissingCap{ cap: crate::store::StoreCap } = "Not Supperted: {cap}",
+
+        Reqwest{source: reqwest::Error} = "Reqwest: {source}",
+
+        Build{source: BuildError} = "Build: {source}",
 
         Unimplemented{ msg: String } = "Unimplemented: {msg}",
 }
@@ -68,4 +75,11 @@ custom_error! {
         UserNotExisting{ user: String } = "the user '{user}' does not exist",
         UserInGroup{ group: String } = "the Nix user should not be a member of '{group}'",
         SysError{ msg: String } = "SysError {msg}",
+        RequireFeature { platform: String, features: Vec<String>, path: String} = @{ format!("a '{}' with features {{{}}} is required to build '{}', but I am a '{}' with features {{{}}}", platform, features.join(" "), path, libutil::config::default_system(), libutil::config::default_system_features().join(" "))}
+        //RequireFeature{ platform: String, features: String, path: String, is_platform: String, is_features: String } = "a '{platform}' with features {{{features}}} is required to build '{path}', but I am a '{is_platform}' with features {{{is_features}}}",
+}
+
+custom_error! {
+    pub PluginError
+        Io{source: std::io::Error} = "IO: {source}",
 }

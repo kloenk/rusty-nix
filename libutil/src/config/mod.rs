@@ -331,7 +331,7 @@ fn default_cores() -> usize {
     num_cpus::get()
 }
 
-fn default_system() -> String {
+pub fn default_system() -> String {
     use std::env::consts;
     format!("{}-{}", consts::ARCH, consts::OS)
 }
@@ -411,7 +411,7 @@ fn default_sandbox_build_dir() -> String {
 }
 
 #[cfg(target_os = "linux")]
-fn default_system_features() -> Vec<String> {
+pub fn default_system_features() -> Vec<String> {
     let mut vec = vec![
         String::from("nixos-test"),
         String::from("benchmark"),
@@ -426,7 +426,7 @@ fn default_system_features() -> Vec<String> {
 }
 
 #[cfg(not(any(target_os = "linux")))]
-fn default_system_features() -> Vec<String> {
+pub fn default_system_features() -> Vec<String> {
     vec![]
 }
 

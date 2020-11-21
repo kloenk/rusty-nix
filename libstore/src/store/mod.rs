@@ -12,6 +12,7 @@ pub use crate::error::StoreError;
 
 use chrono::NaiveDateTime;
 
+pub mod binary;
 pub mod local_store;
 pub mod protocol;
 
@@ -60,19 +61,22 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
         &'a self,
         drvs: Vec<path::StorePathWithOutputs>,
         mode: u8,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>>; // TODO: make mode an enum
 
     fn query_missing<'a>(
         &'a self,
         paths: &'a Vec<path::StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<MissingInfo, StoreError>>;
 
     fn prime_cache<'a>(
         &'a self,
         drvs: &'a Vec<path::StorePathWithOutputs>,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
     ) -> LocalFutureObj<'a, Result<(), StoreError>> {
         LocalFutureObj::new(Box::new(async move {
-            let missing = self.query_missing(drvs).await?;
+            let missing = self.query_missing(drvs, plugin_reg).await?;
 
             let conf = crate::CONFIG.read().unwrap();
             let max_build_jobs = conf.max_jobs.clone();
@@ -91,6 +95,22 @@ pub trait BuildStore: WriteStore + ReadStore + Store {
             Ok(())
         }))
     }
+
+    fn qurey_substitutable_path_infos<'a>(
+        &'a self,
+        path: &'a path::StorePaths,
+        plugin_reg: &'a crate::plugin::PluginRegistry,
+    ) -> LocalFutureObj<'a, Result<path::SubstitutablePathInfos, StoreError>> {
+        LocalFutureObj::new(Box::new(
+            async move { Ok(path::SubstitutablePathInfos::new()) },
+        ))
+    }
+
+    fn ensure_path<'a>(
+        &'a self,
+        path: &'a path::StorePathWithOutputs,
+        plugin_reg: Arc<crate::plugin::PluginRegistry>,
+    ) -> LocalFutureObj<'a, Result<(), StoreError>>;
 
     fn box_clone_build(&self) -> Box<dyn BuildStore>;
 }
@@ -255,12 +275,29 @@ pub trait ReadStore: Store {
     fn box_clone_read(&self) -> Box<dyn ReadStore>;
 }
 
+impl PartialOrd for dyn ReadStore {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        //Some(self.cmp(other))
+        self.priority().partial_cmp(&other.priority())
+    }
+}
+
+impl PartialEq for dyn ReadStore {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority() == other.priority()
+    }
+}
+
 /// This is the main store Trait, needed by every kind of store.
 /// Every Store has to implement Clone. If a store has some data which in mutable inside it has to handle it itself.
 pub trait Store {
     fn get_store_dir<'a>(&'a self) -> Result<String, StoreError>;
 
     fn get_state_dir<'a>(&'a self) -> Result<String, StoreError>;
+
+    fn get_uri<'a>(&'a self) -> String {
+        self.get_store_dir().unwrap()
+    }
 
     fn parse_store_path<'a>(&'a self, path: &'a str) -> Result<StorePath, StoreError> {
         // TODO: canon path
@@ -298,10 +335,59 @@ pub trait Store {
         format!("{}/{}", self.get_store_dir().unwrap(), path)
     }
 
+    fn priority<'a>(&'a self) -> u64 {
+        100
+    }
+
+    fn capability<'a>(&'a self) -> StoreCap {
+        StoreCap::None
+    }
+
     fn box_clone(&self) -> Box<dyn Store>;
 }
 
-pub async fn open_store(
+impl PartialOrd for dyn Store {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        //Some(self.cmp(other))
+        self.priority().partial_cmp(&other.priority())
+    }
+}
+
+impl PartialEq for dyn Store {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority() == other.priority()
+    }
+}
+
+// FIXME: move into Connection??
+/*pub async fn get_default_substituters() -> Result<Vec<Box<dyn ReadStore>>, StoreError> {
+    let setting = crate::CONFIG.read().unwrap();
+    let mut ret: Vec<Box<dyn ReadStore>> = Vec::new();
+    use std::collections::HashMap;
+    //let empty = HashMap::new();
+
+    for uri in &setting.substituters {
+        //ret.push(open_store_read(uri, empty.clone()).await?);
+    }
+
+    for uri in &setting.extra_substituters {
+        //ret.push(open_store_read(uri, empty.clone()).await?);
+    }
+
+    //ret.sort();
+    ret.sort_by(|a, b| a.partial_cmp(b).unwrap());
+
+    Ok(ret)
+}*/
+
+/*pub async fn open_store_read(
+    store_uri: &str,
+    params: std::collections::HashMap<String, Param>,
+) -> Result<Box<dyn ReadStore>, StoreError> {
+    unimplemented!()
+}
+
+pub async fn open_store_build(
     store_uri: &str,
     params: std::collections::HashMap<String, Param>,
 ) -> Result<Box<dyn BuildStore>, StoreError> {
@@ -320,12 +406,33 @@ pub async fn open_store(
     let path = &store_uri["file://".len()..];
     let store = local_store::LocalStore::open_store(path, params).await?;
     Ok(Box::new(store))
-}
+}*/
 
 /*pub fn print_store_path(v: &std::path::Path) -> String {
     // TODO: storeDir +
     v.display().to_string()
 }*/
+
+#[derive(Debug, PartialEq, Eq, Ord, PartialOrd)]
+#[repr(u8)]
+pub enum StoreCap {
+    None = 0,
+    Read = 1,
+    Write = 2,
+    Build = 3,
+}
+
+impl std::fmt::Display for StoreCap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let cap = match self {
+            StoreCap::None => "None",
+            StoreCap::Read => "Read",
+            StoreCap::Write => "Write",
+            StoreCap::Build => "Build",
+        };
+        write!(f, "{}", cap)
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 #[repr(u8)]
